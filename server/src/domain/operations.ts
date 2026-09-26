@@ -583,11 +583,13 @@ export function completeDelivery(ref: string, user: string): Delivery {
   for (const line of doc.lines) {
     const product = findProduct(line.sku);
     if (!product) continue;
+    const plan = check.lines.find((c) => c.id === line.id);
+    const source = plan?.pullFrom ?? doc.from;
     let legs: { location: string; delta: number }[];
     try {
-      legs = debit(product, line.pullFrom, line.qty);
+      legs = debit(product, source, line.qty);
     } catch {
-      if (guard) throw conflict(`${ref} cannot be completed.`, [`${product.name} is short at ${line.pullFrom}.`]);
+      if (guard) throw conflict(`${ref} cannot be completed.`, [`${product.name} is short at ${source}.`]);
       legs = [];
     }
     postLedger({
@@ -595,7 +597,7 @@ export function completeDelivery(ref: string, user: string): Delivery {
       ref: doc.ref,
       sku: product.sku,
       delta: -round(line.qty),
-      from: line.pullFrom,
+      from: source,
       to: doc.customer,
       legs,
       user,
@@ -685,6 +687,22 @@ export function createTransfer(input: TransferInput, user: string): Transfer {
     );
   }
   if (!input.lines?.length) throw badRequest('Add at least one product to the transfer.');
+
+  // Refuse to draft a move the source cannot cover, so the drawer and the
+  // server agree instead of the document failing half way through.
+  if (getDb().settings.preventNegativeStock) {
+    const short: string[] = [];
+    for (const line of input.lines) {
+      const product = requireProduct(line.sku);
+      const have = atLocation(product, input.from);
+      if (have < line.qty) {
+        short.push(`${product.name}: needs ${line.qty} ${product.uom}, only ${have} at ${input.from}.`);
+      }
+    }
+    if (short.length > 0) {
+      throw conflict('This transfer cannot be created — the source does not hold enough stock.', short);
+    }
+  }
 
   const doc: Transfer = {
     ref: nextRef('transfer'),

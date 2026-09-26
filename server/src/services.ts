@@ -308,6 +308,7 @@ export function locationView(code: string) {
   const db = getDb();
   const location = requireLocation(code);
   const scope = locationScope(code);
+  const ownBalance = round(db.products.reduce((a, p) => a + (p.stock[code] ?? 0), 0));
   const stock = db.products
     .map((p) => ({ sku: p.sku, name: p.name, uom: p.uom, qty: round(atLocation(p, code)) }))
     .filter((s) => s.qty > 0)
@@ -339,6 +340,7 @@ export function locationView(code: string) {
     }));
   return {
     ...location,
+    ownBalance,
     breadcrumb: pathOf(code).map((l) => ({ code: l.code, name: l.name })),
     childCount: childrenOf(code).length,
     scopeSize: scope.length,
@@ -537,10 +539,11 @@ export function dashboardSummary() {
 
 export function snapshot(user: User | null) {
   const db = getDb();
-  const { credentials, readNotifications, ...safe } = db;
+  const { credentials, products, readNotifications, ...safe } = db;
   void credentials;
   return {
     ...safe,
+    products: products.map(productView),
     readNotifications,
     generatedAt: now(),
     me: user ? { user, permissions: permissionsFor(user.role), roleSummary: ROLE_SUMMARY[user.role] } : null,
@@ -590,18 +593,26 @@ export const services = {
           products: occupants(l.code).map((o) => ({ ...o })),
         }))
         .sort((a, b) => b.totalUnits - a.totalUnits),
-    location: (code: string) => locationView(code),
+    location: (code: string) => {
+      if (!findLocation(code)) throw notFound(`“${code}” is not a location in this network.`);
+      return locationView(code);
+    },
     leavesUnder: (code: string) => leavesUnder(code),
   },
   warehouses: {
     list: () => warehousesView(),
     get: (code: string) => {
       const summary = warehousesView().find((w) => w.code === code);
-      if (!summary) throw new Error(`Warehouse ${code} not found`);
+      if (!summary) throw notFound(`“${code}” is not a warehouse in this network.`);
       const db = getDb();
+      const tree = (locCode: string): ReturnType<typeof locationView> & { children: unknown[] } => ({
+        ...locationView(locCode),
+        children: childrenOf(locCode).map((c) => tree(c.code)),
+      });
       return {
         ...summary,
-        locations: childrenOf(code).map((l) => locationView(l.code)),
+        locations: childrenOf(code).map((l) => tree(l.code)),
+        leafCount: leavesUnder(code).length,
         receipts: db.receipts.filter((r) => r.destination === code).map(receiptView),
         deliveries: db.deliveries.filter((d) => d.from === code).map(deliveryView),
         transfers: db.transfers.filter((t) => t.from === code || t.to === code).map(transferView),

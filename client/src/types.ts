@@ -1,256 +1,30 @@
-export type Unit = 'kg' | 'Units' | 'Rolls';
-export type ProductStatus = 'IN_STOCK' | 'LOW' | 'OUT';
-/**
- * Mirrors the server's `status.ts`. `Overdue` is not a status: a late document
- * stays in its own step and carries a derived `attention` flag instead.
- */
-export type DocStatus =
-  | 'Draft'
-  | 'Waiting'
-  | 'Ready'
-  | 'Picking'
-  | 'Packed'
-  | 'In Transit'
-  | 'Done'
-  | 'Canceled';
+/* Client mirror of the server domain model. These are the only shapes a page
+   is allowed to read — there are no component-local business numbers. */
 
-export type AttentionKind = 'Overdue' | 'Awaiting approval' | 'Draft' | 'Blocked';
+export type Uom = 'kg' | 'Units' | 'Boxes' | 'Rolls' | 'Litres' | 'Metres' | 'Pieces';
+export type Role = 'Admin' | 'Inventory Manager' | 'Warehouse Staff' | 'Viewer';
+export type Health = 'IN_STOCK' | 'LOW' | 'OUT';
+export type Severity = 'info' | 'success' | 'warning' | 'critical';
+export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'primary';
 
-export interface Attention {
-  kind: AttentionKind;
-  message: string;
-  daysLate: number;
-}
-
-/** Fields the API adds to every document it returns. */
-export interface DocumentMeta {
-  attention: Attention | null;
-  stepIndex: number;
-  stepCount: number;
-}
-
-export interface StatusFlows {
-  receipt: readonly string[];
-  delivery: readonly string[];
-  transfer: readonly string[];
-  adjustment: readonly string[];
-}
-
-export interface DocColumn {
-  key: string;
-  label: string;
-  icon: string;
-}
-
-/**
- * `Overdue` is not a board column or a status — it is the derived attention
- * lane, so it matches on `attention` rather than on the stored status.
- */
-export function isAttentionKey(key: string): key is 'Overdue' {
-  return key === 'Overdue';
-}
-
-export function docMatchesColumn(
-  doc: { status?: string; state?: string; attention?: Attention | null },
-  key: string,
-): boolean {
-  if (isAttentionKey(key)) return doc.attention?.kind === 'Overdue';
-  return (doc.status ?? doc.state) === key;
-}
-export type LedgerType =
-  | 'OPENING'
-  | 'RECEIPT'
-  | 'DELIVERY'
-  | 'TRANSFER'
-  | 'ADJUSTMENT'
-  | 'REVERSAL';
-export type AdjustmentReason =
-  | 'Damaged in Transit'
-  | 'Missing / Investigation'
-  | 'Incorrect Entry / Counting Error'
-  | 'Scrap / Wear & Tear'
-  | 'Supplier Surplus'
-  | 'Other';
-export type AdjustmentState = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Canceled';
-
-export interface Product {
-  id: string;
-  name: string;
-  sku: string;
-  category: string;
-  unit: Unit;
-  unitCost: number;
-  reorderPoint: number;
-  reserved: number;
-  stock: Record<string, number>;
-  icon: string;
-  total: number;
-  free: number;
-  status: ProductStatus;
-  byLocation?: { code: string; name: string; qty: number; container: boolean }[];
-  moves?: LedgerEntry[];
-  openOrders?: { ref: string; kind: 'Delivery' | 'Receipt'; qty: number; to: string; status: string }[];
-}
-
-export interface ReceiptLine {
-  sku: string;
-  expected: number;
-  received: number;
-  bin: string;
-  lot: string;
-  barcode: string;
-  name: string;
-  unit: Unit;
-  unitCost: number;
-  lineValue: number;
-  variance: number;
-}
-
-export interface Receipt extends DocumentMeta {
-  ref: string;
-  supplier: string;
-  supplierTier: 'Tier 1 Vendor' | 'Tier 2 Vendor' | 'Unverified';
-  poRef: string;
-  bolRef: string;
-  destination: string;
-  contact: string;
-  scheduledDate: string;
-  carrier: string;
-  dockBay: string;
-  status: DocStatus;
-  items: ReceiptLine[];
-  notes: string;
-  createdAt: string;
-  createdBy: string;
-  postedAt?: string;
-  lines?: ReceiptLine[];
-  totalValue?: number;
-}
-
-export interface DeliveryLine {
-  sku: string;
-  qty: number;
-  bin: string;
-  name: string;
-  unit: Unit;
-  unitCost: number;
-  availableAtSource: number;
-  availableTotal: number;
-  pullFrom: string;
-  reason: string;
-  sufficient: boolean;
-  shortfall: number;
-  value: number;
-}
-
-export interface Delivery extends DocumentMeta {
-  ref: string;
-  from: string;
-  to: string;
-  contact: string;
-  address: string;
-  scheduledDate: string;
-  carrier: string;
-  status: DocStatus;
-  operationType: string;
-  items: DeliveryLine[];
-  notes: string;
-  createdAt: string;
-  createdBy: string;
-  postedAt?: string;
-  check?: { ref: string; lines: unknown[]; blocked: boolean; blockers: string[]; alreadyPosted: boolean };
-  lines?: DeliveryLine[];
-  totalValue?: number;
-}
-
-export interface Transfer extends DocumentMeta {
-  ref: string;
-  from: string;
-  to: string;
-  sku: string;
-  qty: number;
-  requestedBy: string;
-  status: DocStatus;
-  createdAt: string;
-}
-
-export interface Adjustment extends DocumentMeta {
-  ref: string;
-  sku: string;
-  location: string;
-  recorded: number;
-  counted: number;
-  delta: number;
-  reason: AdjustmentReason;
-  memo: string;
-  auditor: string;
-  state: AdjustmentState;
-  valuationImpact: number;
-  createdAt: string;
-  postedAt?: string;
-  dualSignoff?: boolean;
-}
-
-export interface LedgerEntry {
-  id: string;
-  timestamp: string;
-  type: LedgerType;
-  ref: string;
-  sku: string;
-  name: string;
-  delta: number;
-  from: string;
-  to: string;
-  balanceAfter: number;
-  user: string;
-  note: string;
-}
-
-export interface Warehouse {
-  code: string;
-  name: string;
-  type: string;
-  address: string;
-  manager: string;
-  capacityUsedPct: number;
-  locationCount: number;
-}
-
-export interface StorageLocation {
-  code: string;
-  name: string;
-  shortCode: string;
-  warehouse: string;
-  parent?: string;
-  container: boolean;
-  type: string;
-  skuCount: number;
-  maxLoad: string;
-  status: 'Active' | 'Receiving' | 'Ready' | 'Chill Pass' | 'Locked';
-}
-
-export type Role = 'Admin' | 'Inventory Manager' | 'Warehouse Staff' | 'Floor Supervisor';
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  title: string;
-  initials: string;
-  auditorId: string;
-  active: boolean;
-}
-
-/** Safe subset of `User` published for the sign-in screen demo directory. */
-export interface DirectoryEntry {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  title: string;
-  initials: string;
-}
+export type ReceiptStatus = 'Draft' | 'Waiting' | 'Ready' | 'Done' | 'Canceled';
+export type DeliveryStatus = 'Draft' | 'Waiting' | 'Ready' | 'Picking' | 'Packed' | 'Done' | 'Canceled';
+export type TransferStatus = 'Draft' | 'Waiting' | 'Ready' | 'In Transit' | 'Done' | 'Canceled';
+export type AdjustmentStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Rejected';
+export type CountStatus = 'Scheduled' | 'In Progress' | 'Completed' | 'Canceled';
+export type DocumentStatus = ReceiptStatus | DeliveryStatus | TransferStatus | AdjustmentStatus | CountStatus;
+export type LedgerType = 'OPENING' | 'RECEIPT' | 'DELIVERY' | 'TRANSFER' | 'ADJUSTMENT';
+export type AdjustmentReason = 'Damaged' | 'Missing' | 'Expired' | 'Counting Error' | 'Incorrect Entry' | 'Other';
+export type NotificationType =
+  | 'Low Stock'
+  | 'Out of Stock'
+  | 'Receipt Ready'
+  | 'Delivery Blocked'
+  | 'Transfer Completed'
+  | 'Adjustment Approval'
+  | 'Count Due'
+  | 'Reorder Alert'
+  | 'Cycle Count Variance';
 
 export type Permission =
   | 'product.view'
@@ -274,85 +48,668 @@ export type Permission =
   | 'ledger.view'
   | 'ledger.export'
   | 'report.view'
+  | 'reorder.manage'
+  | 'settings.view'
   | 'settings.manage'
   | 'diagnostics.view'
-  | 'demo.reset'
-  | 'user.impersonate';
+  | 'demo.reset';
 
-export interface SessionInfo {
-  user: User;
-  permissions: Permission[];
+export interface Transition {
+  from: DocumentStatus;
+  to: DocumentStatus;
+  label: string;
+  permission: Permission;
+  posts?: boolean;
+  tone: 'primary' | 'success' | 'danger';
 }
 
-export interface DiagnosticsReport {
-  runtime: { node: string; uptimeSeconds: number; storage: string; seedVersion: number };
-  counts: Record<string, number>;
-  guardrails: { id: string; label: string; active: boolean; thresholdPct?: number }[];
+export interface ReorderRule {
+  productSku: string;
+  minStock: number;
+  reorderPoint: number;
+  safetyStock: number;
+  reorderQty: number;
+  preferredSupplier: string;
+  leadTimeDays: number;
 }
 
-export interface Settings {
-  valuationMethod: 'FIFO' | 'AVCO';
-  removalStrategy: 'FIFO' | 'FEFO';
-  preventNegativeStock: boolean;
-  dualSignoffThreshold: number;
-  dualSignoffVariancePct: number;
-  currency: string;
+export interface ProductLocationRow {
+  code: string;
+  name: string;
+  warehouse: string;
+  qty: number;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string;
+  category: string;
+  uom: Uom;
+  unitCost: number;
+  icon: string;
+  stock: Record<string, number>;
+  reorder: ReorderRule;
+  createdAt: string;
+  updatedAt: string;
+  onHand: number;
+  reserved: number;
+  available: number;
+  incoming: number;
+  health: Health;
+  value: number;
+  locations: ProductLocationRow[];
+  moves?: LedgerEntry[];
+  openOrders?: OpenOrder[];
+  dayFlow?: [string, number][];
+  reservedBy?: { ref: string; customer: string; qty: number }[];
+}
+
+export interface OpenOrder {
+  ref: string;
+  kind: 'Delivery' | 'Receipt' | 'Transfer';
+  qty: number;
+  picked: number;
+  to: string;
+  scheduledDate: string;
+  status: string;
+  link: string;
+}
+
+export interface Warehouse {
+  code: string;
+  name: string;
+  kind: string;
+  address: string;
+  manager: string;
+  capacityUnits: number;
+}
+
+export interface WarehouseSummary {
+  code: string;
+  name: string;
+  kind: string;
+  manager: string;
+  address: string;
+  locations: number;
+  leafLocations: number;
+  products: number;
+  stockValue: number;
+  stockUnits: number;
+  utilisation: number;
+  usedVolume: number;
+  capacity: number;
+  incoming: number;
+  outgoing: number;
+  topProducts: string[];
+  receipts: number;
+  deliveries: number;
+  transfers: number;
+  health: 'Healthy' | 'Busy' | 'Critical';
+}
+
+export interface LocationNode {
+  code: string;
+  name: string;
+  warehouse: string;
+  parent?: string;
+  container: boolean;
+  type: string;
+  capacityUnits: number;
+  volumePerUnit: number;
+  state: string;
+  ownBalance?: number;
+  breadcrumb?: { code: string; name: string }[];
+  childCount?: number;
+  scopeSize?: number;
+  stock?: { sku: string; name: string; uom: string; qty: number }[];
+  skuCount?: number;
+  totalUnits?: number;
+  stockValue?: number;
+  capacity?: number;
+  usedVolume?: number;
+  utilisation?: number;
+  pendingMoves?: {
+    ref: string;
+    kind: string;
+    sku: string;
+    qty: number;
+    link: string;
+    status: string;
+  }[];
+  activity?: {
+    at: string;
+    ref: string;
+    type: LedgerType;
+    sku: string;
+    name: string;
+    delta: number;
+    user: string;
+    note: string;
+  }[];
+  children?: LocationNode[];
+}
+
+export interface LocationSummary {
+  code: string;
+  name: string;
+  warehouse: string;
+  type: string;
+  state: string;
+  capacity: number;
+  usedVolume: number;
+  utilisation: number;
+  skuCount: number;
+  totalUnits: number;
+  value: number;
+  products: { sku: string; name: string; uom: string; qty: number }[];
+}
+
+export interface ReceiptLine {
+  id: string;
+  sku: string;
+  expected: number;
+  received: number;
+  bin: string;
+  binName: string;
+  binValid: boolean;
+  lot: string;
+  barcode: string;
+  name: string;
+  uom: Uom;
+  unitCost: number;
+  lineValue: number;
+  variance: number;
+  onHandAtBin: number;
+}
+
+export interface Receipt {
+  ref: string;
+  supplier: string;
+  poRef: string;
+  bolRef: string;
+  contact: string;
+  destination: string;
+  destinationName: string;
+  scheduledDate: string;
+  carrier: string;
+  dockBay: string;
+  status: ReceiptStatus;
+  notes: string;
+  createdAt: string;
+  createdBy: string;
+  validatedAt?: string;
+  validatedBy?: string;
+  lines: ReceiptLine[];
+  items: ReceiptLine[];
+  totalExpected: number;
+  totalReceived: number;
+  totalValue: number;
+  overdue: boolean;
+  transitions: Transition[];
+  impact?: ReceiptImpact[];
+  createdByUser?: User | null;
+}
+
+export interface ReceiptImpact {
+  sku: string;
+  name: string;
+  uom: Uom;
+  bin: string;
+  before: number;
+  receiving: number;
+  after: number;
+}
+
+export interface DeliveryLine {
+  id: string;
+  sku: string;
+  qty: number;
+  picked: number;
+  bin: string;
+  packed: boolean;
+  name: string;
+  uom: Uom;
+  unitCost: number;
+  value: number;
+  availableAtSource: number;
+  availableTotal: number;
+  pullFrom: string;
+  sufficient: boolean;
+  shortfall: number;
+  reason: string;
+}
+
+export interface LineAvailability {
+  id: string;
+  sku: string;
+  name: string;
+  uom: Uom;
+  bin: string;
+  required: number;
+  picked: number;
+  availableAtSource: number;
+  availableTotal: number;
+  pullFrom: string;
+  shortfall: number;
+  sufficient: boolean;
+  reason: string;
+}
+
+export interface DeliveryCheck {
+  ref: string;
+  status: DeliveryStatus;
+  lines: LineAvailability[];
+  blocked: boolean;
+  blockers: string[];
+  totalRequired: number;
+  totalAvailable: number;
+  pickedLines: number;
+  pickProgress: number;
+  overdue: boolean;
+  daysLate: number;
+}
+
+export interface Delivery {
+  ref: string;
+  customer: string;
+  contact: string;
+  address: string;
+  from: string;
+  sourceName: string;
+  scheduledDate: string;
+  carrier: string;
+  status: DeliveryStatus;
+  notes: string;
+  createdAt: string;
+  createdBy: string;
+  completedAt?: string;
+  completedBy?: string;
+  lines: DeliveryLine[];
+  items: DeliveryLine[];
+  check: DeliveryCheck;
+  totalQty: number;
+  totalValue: number;
+  overdue: boolean;
+  daysLate: number;
+  transitions: Transition[];
+}
+
+export interface TransferLine {
+  id: string;
+  sku: string;
+  qty: number;
+  name: string;
+  uom: Uom;
+  availableAtSource: number;
+  remainingAfter: number;
+  availableAtDestination: number;
+  onHand: number;
+}
+
+export interface Transfer {
+  ref: string;
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+  lines: TransferLine[];
+  status: TransferStatus;
+  reason: string;
+  requestedBy: string;
+  createdAt: string;
+  completedAt?: string;
+  completedBy?: string;
+  totalQty: number;
+  enterpriseTotal: number;
+  nested: boolean;
+  transitions: Transition[];
+  createdByUser?: User | null;
+}
+
+export interface Adjustment {
+  ref: string;
+  sku: string;
+  name: string;
+  uom: Uom;
+  unitCost: number;
+  location: string;
+  locationName: string;
+  recorded: number;
+  counted: number | null;
+  difference: number | null;
+  reason: AdjustmentReason;
+  notes: string;
+  status: AdjustmentStatus;
+  countRef?: string;
+  createdAt: string;
+  createdBy: string;
+  submittedBy?: string;
+  approvedBy?: string;
+  postedAt?: string;
+  impact: number;
+  variancePct: number;
+  approvalRequired: boolean;
+  approvalReason: string;
+  currentOnHand: number;
+  transitions: Transition[];
+  count: { ref: string; assignedTo: string; status: string } | null;
+}
+
+export interface CountLine {
+  id: string;
+  sku: string;
+  name: string;
+  uom: Uom;
+  location: string;
+  locationName: string;
+  systemQty: number;
+  counted: number | null;
+  difference: number | null;
+  currentOnHand: number;
+  note: string;
+}
+
+export interface Count {
+  ref: string;
+  warehouse: string;
+  location: string;
+  category: string;
+  assignedTo: string;
+  dueDate: string;
+  status: CountStatus;
+  lines: CountLine[];
+  notes: string;
+  createdAt: string;
+  createdBy: string;
+  completedAt?: string;
+  totalLines: number;
+  countedLines: number;
+  progress: number;
+  variances: number;
+  absoluteVariance: number;
+  adjustments: { ref: string; sku: string; status: string; difference: number | null }[];
+  overdue: boolean;
+  daysToDue: number;
+  transitions: Transition[];
+}
+
+export interface LedgerLeg {
+  location: string;
+  delta: number;
+}
+
+export interface LedgerEntry {
+  id: string;
+  at: string;
+  type: LedgerType;
+  ref: string;
+  sku: string;
+  name: string;
+  delta: number;
+  from: string;
+  to: string;
+  legs: LedgerLeg[];
+  balanceAfter: number;
+  user: string;
+  note: string;
+}
+
+export interface LedgerSummary {
+  total: number;
+  receipt: number;
+  delivery: number;
+  transfer: number;
+  adjustment: number;
+  opening: number;
+}
+
+export interface DomainEvent {
+  id: string;
+  at: string;
+  type: string;
+  ref: string;
+  summary: string;
+  detail: string;
+  user: string;
+  link?: string;
+  severity: Severity;
+}
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  detail: string;
+  ref: string;
+  link: string;
+  severity: Severity;
+  at: string;
+  key: string;
+}
+
+export interface NotificationSummary {
+  total: number;
+  unread: number;
+  critical: number;
+}
+
+export interface AttentionItem {
+  id: string;
+  kind: string;
+  severity: Exclude<Severity, 'success'>;
+  title: string;
+  detail: string;
+  status: string;
+  link: string;
+  cta: string;
 }
 
 export interface DashboardSummary {
-  catalogSkus: number;
-  totalOnHand: number;
-  freeToAllocate: number;
+  currency: string;
+  totalStock: number;
+  available: number;
   reserved: number;
-  valuation: number;
-  lowStock: Product[];
+  inventoryValue: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  lowStockList: { sku: string; name: string; uom: Uom; onHand: number; available: number; reorderPoint: number }[];
+  outOfStockList: { sku: string; name: string; uom: Uom; onHand: number; reorderPoint: number }[];
   pendingReceipts: number;
   pendingDeliveries: number;
-  waitingDeliveries: number;
-  readyDeliveries: number;
-  doneDeliveries: number;
-  overdueDeliveries: number;
-  lateReceipts: number;
-  lateTransfers: number;
-  /** documents past their scheduled slot, summed across all kinds */
-  overdueCount: number;
-  scheduledTransfers: number;
-  pendingAdjustments: number;
+  blockedDeliveries: number;
+  openTransfers: number;
+  pendingApprovals: number;
+  openCounts: number;
+  accuracy: number;
+  catalogSkus: number;
+  warehouses: number;
+  locations: number;
   ledgerEntries: number;
+  notifications: NotificationSummary;
+  attention: AttentionItem[];
+  timeline: DomainEvent[];
 }
 
-export interface ScenarioStep {
-  key: string;
-  index: number;
+export interface ReorderRow {
+  sku: string;
+  name: string;
+  uom: Uom;
+  supplier: string;
+  onHand: number;
+  available: number;
+  reserved: number;
+  minStock: number;
+  reorderPoint: number;
+  safetyStock: number;
+  suggestedQty: number;
+  leadTimeDays: number;
+  unitCost: number;
+  estimatedValue: number;
+  status: 'Critical' | 'Reorder' | 'Healthy';
+  primaryLocation: string;
+  primaryLocationQty: number;
+}
+
+export interface LowStockByLocation {
+  sku: string;
+  name: string;
+  uom: Uom;
+  location: string;
+  onHand: number;
+  reorderPoint: number;
+  suggestedQty: number;
+  status: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
   title: string;
-  detail: string;
-  completed: boolean;
+  initials: string;
+  employeeCode: string;
   active: boolean;
+  lastActiveAt: string;
 }
 
-export interface ScenarioState {
-  steps: ScenarioStep[];
-  currentStep: number;
-  complete: boolean;
-  /** true once the drill has been rewound and not yet finished */
-  started: boolean;
-  steel: { sku: string; total: number; rack: number; production: number } | null;
-  refs: { receipt: string; transfer: string; delivery: string; adjustment: string };
+export interface Category {
+  id: string;
+  name: string;
+  icon: string;
+}
+
+export interface CompanyProfile {
+  name: string;
+  legalName: string;
+  gstin: string;
+  address: string;
+  city: string;
+  country: string;
+  timezone: string;
+  currency: string;
+  fiscalYearStart: string;
+}
+
+export interface Settings {
+  company: CompanyProfile;
+  preventNegativeStock: boolean;
+  approvalRequired: boolean;
+  approvalValueThreshold: number;
+  approvalVariancePct: number;
+  defaultUom: Uom;
+  allowPartialDeliveries: boolean;
+  notificationEmail: boolean;
+  notificationInApp: boolean;
+  lowStockDigest: boolean;
+  sessionTimeoutHours: number;
+  theme: 'light' | 'system';
+  density: 'comfortable' | 'compact';
+}
+
+export interface ReportColumn {
+  key: string;
+  label: string;
+  align?: 'left' | 'right';
+  numeric?: boolean;
+}
+
+export interface ReportResult {
+  id: string;
+  name: string;
+  description: string;
+  columns: ReportColumn[];
+  rows: Record<string, string | number>[];
+  totals?: Record<string, string | number>;
+  chart?: { label: string; value: number }[];
+}
+
+export interface ReportDefinition {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface SearchHit {
+  group: 'Products' | 'Operations' | 'Warehouses' | 'Locations';
+  id: string;
+  title: string;
+  subtitle: string;
+  ref: string;
+  link: string;
+  meta?: string;
+}
+
+export interface DiagnosticsReport {
+  runtime: {
+    node: string;
+    platform: string;
+    uptimeSeconds: number;
+    memoryMb: number;
+    storage: string;
+    schemaVersion: number;
+    seedVersion: number;
+    demoMode: boolean;
+  };
+  environment: { name: string; repositoryUrl: string; repositoryConfigured: boolean };
+  services: { api: string; database: string; realtime: string; lastSync: string };
+  counts: Record<string, number>;
+  guardrails: { id: string; label: string; active: boolean; detail: string }[];
+  permissions: Record<string, Permission[]>;
+}
+
+export interface Domains {
+  receipt: readonly ReceiptStatus[];
+  delivery: readonly DeliveryStatus[];
+  transfer: readonly TransferStatus[];
+  adjustment: readonly AdjustmentStatus[];
+  count: readonly CountStatus[];
+  reasons: readonly AdjustmentReason[];
+  units: readonly Uom[];
 }
 
 export interface Snapshot {
   version: number;
+  builtAt: string;
+  generatedAt: string;
   settings: Settings;
   users: User[];
+  categories: Category[];
   warehouses: Warehouse[];
-  locations: StorageLocation[];
+  locations: LocationNode[];
   products: Product[];
   receipts: Receipt[];
   deliveries: Delivery[];
   transfers: Transfer[];
   adjustments: Adjustment[];
+  counts: Count[];
   ledger: LedgerEntry[];
+  events: DomainEvent[];
+  readNotifications: string[];
   dashboard: DashboardSummary;
-  scenario: ScenarioState;
-  me: SessionInfo | null;
+  notifications: Notification[];
+  reorder: ReorderRow[];
+  lowStockByLocation: LowStockByLocation[];
+  warehousesSummary: WarehouseSummary[];
+  reports: ReportDefinition[];
+  domains: Domains;
+  me: { user: User; permissions: Permission[]; roleSummary: string } | null;
+}
+
+export interface DirectoryEntry {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  title: string;
+  initials: string;
+}
+
+export interface ProfileInfo {
+  user: User;
+  permissions: Permission[];
+  roleSummary: string;
+  stats: { documentsRaised: number; movements: number; approvals: number };
 }

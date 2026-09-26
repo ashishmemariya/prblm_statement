@@ -12,8 +12,8 @@ export function now(now: Date = new Date()): string {
   return `${dateOnly(now)}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
-export function stamp(now: Date = new Date()): string {
-  return `${now(now)}:${pad(now.getSeconds())}`;
+export function stamp(d: Date = new Date()): string {
+  return `${now(d)}:${pad(d.getSeconds())}`;
 }
 
 export function dateOnly(d: Date = new Date()): string {

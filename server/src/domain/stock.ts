@@ -276,21 +276,16 @@ export function usedUnits(code: string): number {
   return round(used);
 }
 
-export function utilisation(code: string): number {
-  const loc = findLocation(code);
-  const capacity = loc?.capacity ?? 0;
-  if (capacity <= 0) {
-    const childCapacity = childrenOf(code).reduce((a, c) => a + c.capacityUnits, 0);
-    if (childCapacity <= 0) return 0;
-    return Math.min(100, Math.round((usedUnits(code) / childCapacity) * 100));
-  }
-  return Math.min(100, Math.round((usedUnits(code) / capacity) * 100));
-}
-
 export function capacityOf(code: string): number {
   const loc = findLocation(code);
   if (!loc) return 0;
   return loc.capacityUnits > 0 ? loc.capacityUnits : childrenOf(code).reduce((a, c) => a + c.capacityUnits, 0);
+}
+
+export function utilisation(code: string): number {
+  const capacity = capacityOf(code);
+  if (capacity <= 0) return 0;
+  return Math.min(100, Math.round((usedUnits(code) / capacity) * 100));
 }
 
 /** SKUs holding stock anywhere in a subtree, largest first. */

@@ -3,45 +3,64 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Database } from './types.js';
 import { buildSeed, SEED_VERSION } from './seed.js';
+import { now } from './datetime.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const DB_PATH = resolve(here, '../data/db.json');
 
-let db: Database = load();
-let ledgerSeq = db.ledger.length;
-let docSeq = { receipt: 7, delivery: 7, transfer: 4, adjustment: 4 };
+let db: Database;
+let seq: Record<string, number> = {};
+let ledgerSeq = 1;
+let eventSeq = 1;
+let lineSeq = 1;
+
+function deriveSequences(target: Database): void {
+  const maxOf = (refs: string[], prefix: string, fallback: number): number => {
+    const nums = refs
+      .map((r) => Number(r.slice(prefix.length).split('/')[0]))
+      .filter((n) => Number.isFinite(n));
+    return nums.length ? Math.max(...nums) + 1 : fallback;
+  };
+  seq = {
+    receipt: maxOf(target.receipts.map((r) => r.ref), 'RC-', 1001),
+    delivery: maxOf(target.deliveries.map((d) => d.ref), 'DL-', 3001),
+    transfer: maxOf(target.transfers.map((t) => t.ref), 'TR-', 2001),
+    adjustment: maxOf(target.adjustments.map((a) => a.ref), 'ADJ-', 4001),
+    count: maxOf(target.counts.map((c) => c.ref), 'CNT-', 5001),
+  };
+  const ledgerIds = target.ledger.map((l) => Number(l.id.slice(3)));
+  ledgerSeq = (ledgerIds.length ? Math.max(...ledgerIds) : 0) + 1;
+  const eventIds = target.events.map((e) => Number(e.id.slice(3)));
+  eventSeq = (eventIds.length ? Math.max(...eventIds) : 0) + 1;
+  const lineIds = [
+    ...target.receipts.flatMap((r) => r.lines),
+    ...target.deliveries.flatMap((d) => d.lines),
+    ...target.transfers.flatMap((t) => t.lines),
+    ...target.counts.flatMap((c) => c.lines),
+  ]
+    .map((l) => Number(String(l.id).replace(/\D/g, '')))
+    .filter((n) => Number.isFinite(n));
+  lineSeq = (lineIds.length ? Math.max(...lineIds) : 0) + 1;
+}
 
 function load(): Database {
   if (existsSync(DB_PATH)) {
     try {
       const parsed = JSON.parse(readFileSync(DB_PATH, 'utf8')) as Database;
-      // A stale schema (e.g. before credentials existed) must not boot; reseed instead.
       if (parsed.version !== SEED_VERSION) throw new Error('schema version mismatch');
       if (!Array.isArray(parsed.credentials) || parsed.credentials.length === 0) {
         throw new Error('missing credentials');
       }
-      ledgerSeq = parsed.ledger.length;
-      docSeq = {
-        receipt: maxRef(parsed.receipts.map((r) => r.ref)) + 1,
-        delivery: maxRef(parsed.deliveries.map((d) => d.ref)) + 1,
-        transfer: maxRef(parsed.transfers.map((t) => t.ref), 2000) + 1,
-        adjustment: maxRef(parsed.adjustments.map((a) => a.ref), 4000) + 1,
-      };
+      deriveSequences(parsed);
       return parsed;
     } catch {
-      /* corrupt file — fall through to reseed */
+      /* unreadable or stale — fall through to a fresh seed */
     }
   }
   const fresh = buildSeed();
+  deriveSequences(fresh);
   persist(fresh);
   return fresh;
-}
-
-function maxRef(refs: string[], fallback = 0): number {
-  const nums = refs
-    .map((r) => Number(r.split('/').pop() ?? NaN))
-    .filter((n) => Number.isFinite(n));
-  return nums.length ? Math.max(...nums) : fallback;
 }
 
 function persist(target: Database = db): void {
@@ -61,8 +80,7 @@ export function commit(next: Database = db): Database {
 
 export function resetDb(): Database {
   db = buildSeed();
-  ledgerSeq = db.ledger.length;
-  docSeq = { receipt: 7, delivery: 7, transfer: 4, adjustment: 4 };
+  deriveSequences(db);
   persist();
   return db;
 }
@@ -70,36 +88,35 @@ export function resetDb(): Database {
 export function hardReset(): void {
   if (existsSync(DB_PATH)) unlinkSync(DB_PATH);
   db = buildSeed();
-  ledgerSeq = db.ledger.length;
-  docSeq = { receipt: 7, delivery: 7, transfer: 4, adjustment: 4 };
+  deriveSequences(db);
   persist();
 }
 
+export function nextRef(kind: 'receipt' | 'delivery' | 'transfer' | 'adjustment' | 'count'): string {
+  const n = seq[kind] ?? 1;
+  seq[kind] = n + 1;
+  const prefix = { receipt: 'RC-', delivery: 'DL-', transfer: 'TR-', adjustment: 'ADJ-', count: 'CNT-' }[
+    kind
+  ];
+  return `${prefix}${n}`;
+}
+
 export function nextLedgerId(): string {
-  ledgerSeq += 1;
-  return `LG-${String(ledgerSeq).padStart(4, '0')}`;
+  return `LG-${String(ledgerSeq++).padStart(5, '0')}`;
 }
 
-export function nextReceiptRef(): string {
-  return `WH/IN/${String(docSeq.receipt++).padStart(4, '0')}`;
+export function nextEventId(): string {
+  return `EV-${String(eventSeq++).padStart(5, '0')}`;
 }
 
-export function nextDeliveryRef(): string {
-  return `WH/OUT/${String(docSeq.delivery++).padStart(4, '0')}`;
+export function nextLineId(prefix = 'LN'): string {
+  return `${prefix}-${String(lineSeq++).padStart(4, '0')}`;
 }
 
-export function nextTransferRef(): string {
-  return `TR-${docSeq.transfer++}`;
+export function touchedAt(): string {
+  return now();
 }
 
-export function nextAdjustmentRef(): string {
-  return `ADJ-${docSeq.adjustment++}`;
-}
-
-export function nowStamp(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(
-    d.getMinutes(),
-  )}:${p(d.getSeconds())}`;
-}
+// Boot last: `load()` needs `buildSeed`, and the sequence counters must already
+// exist when the seed asks for its first id.
+db = load();

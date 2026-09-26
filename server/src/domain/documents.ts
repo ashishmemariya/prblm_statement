@@ -91,13 +91,16 @@ export function findTransition<S extends string>(
 ): Transition<S> {
   const hit = flow.find((t) => t.from === from && t.to === to);
   if (!hit) {
-    throw badRequest(`A ${from.toLowerCase()} document cannot move to ${to.toLowerCase()}.`);
+    const allowed = flow.filter((t) => t.from === from).map((t) => t.to);
+    throw badRequest(
+      `A ${from} document cannot move to ${to}.${allowed.length ? ` From ${from} you can move to ${allowed.join(', ')}.` : ''}`,
+    );
   }
   return hit;
 }
 
 export function assertTransition<S extends string>(flow: Transition<S>[], from: S, to: S): Transition<S> {
-  if (from === to) throw badRequest(`This document is already ${from.toLowerCase()}.`);
+  if (from === to) throw badRequest(`This document is already ${from}.`);
   return findTransition(flow, from, to);
 }
 

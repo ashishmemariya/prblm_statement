@@ -8,14 +8,24 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, ApiError, readToken, writeToken } from './api';
-import type { Permission, SessionInfo, Snapshot, User } from './types';
+import { ApiError, readToken, writeToken } from './http';
+import { authService, demoService } from './services';
+import type { Permission, Snapshot, User } from './types';
 
 export interface Toast {
   id: number;
-  kind: 'success' | 'error' | 'info' | 'warn';
+  tone: 'success' | 'error' | 'warning' | 'info';
   title: string;
   detail?: string;
+  blockers?: string[];
+  /** Optional single action, e.g. "View transfer". */
+  action?: { label: string; to: string };
+}
+
+export interface OperationResult<T> {
+  ok: boolean;
+  data?: T;
+  error?: string;
   blockers?: string[];
 }
 
@@ -24,16 +34,24 @@ interface AppState {
   user: User | null;
   permissions: Permission[];
   loading: boolean;
-  /** true while we are restoring an existing session on first paint */
   restoring: boolean;
   busy: boolean;
+  /** Bumped on every completed mutation — pages use it to reload their detail. */
+  revision: number;
+  lastSyncAt: string;
   toasts: Toast[];
-  can: (p: Permission) => boolean;
+  can: (permission: Permission) => boolean;
+  canAny: (...permissions: Permission[]) => boolean;
   signIn: (email: string, password: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
-  run: <T>(label: string, fn: () => Promise<T>, opts?: { success?: string }) => Promise<T | null>;
-  notify: (t: Omit<Toast, 'id'>) => void;
+  /** Runs a mutation, refreshes the shared snapshot and reports the outcome. */
+  run: <T>(
+    label: string,
+    fn: () => Promise<T>,
+    opts?: { success?: string; detail?: string; action?: Toast['action'] },
+  ) => Promise<OperationResult<T>>;
+  notify: (toast: Omit<Toast, 'id'>) => void;
   dismiss: (id: number) => void;
 }
 
@@ -46,49 +64,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [restoring, setRestoring] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
+  const inflight = useRef(false);
 
   const dismiss = useCallback((id: number) => {
-    setToasts((t) => t.filter((x) => x.id !== id));
+    setToasts((list) => list.filter((t) => t.id !== id));
   }, []);
 
-  const notify = useCallback((t: Omit<Toast, 'id'>) => {
+  const notify = useCallback((toast: Omit<Toast, 'id'>) => {
     const id = ++seq.current;
-    setToasts((prev) => [...prev, { ...t, id }]);
-    if (t.kind !== 'error') {
-      setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4500);
+    setToasts((list) => [...list, { ...toast, id }]);
+    if (toast.tone !== 'error') {
+      setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 6000);
     }
   }, []);
 
-  /** Pull the canonical snapshot. A 401 means the stored token is no longer valid. */
+  const clearSession = useCallback(() => {
+    writeToken(null);
+    setUser(null);
+    setPermissions([]);
+    setSnap(null);
+  }, []);
+
+  /** Pull the one canonical snapshot every page reads from. */
   const refresh = useCallback(async () => {
+    if (inflight.current) return;
+    inflight.current = true;
     try {
-      const next = await api.snapshot();
+      const next = await demoService.snapshot();
       setSnap(next);
       setUser(next.me?.user ?? null);
       setPermissions(next.me?.permissions ?? []);
+      setLastSyncAt(next.generatedAt);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        writeToken(null);
-        setSnap(null);
-        setUser(null);
-        setPermissions([]);
+        clearSession();
         return;
       }
-      setToasts((t) => [
-        ...t,
+      setToasts((list) => [
+        ...list,
         {
           id: ++seq.current,
-          kind: 'error',
-          title: 'Cannot reach the StockSense API',
-          detail: err instanceof Error ? err.message : 'Is the server running on :4000?',
+          tone: 'error',
+          title: 'Cannot reach the StockSense service',
+          detail:
+            err instanceof ApiError
+              ? err.message
+              : 'Check that the backend is running, then press Retry.',
         },
       ]);
     } finally {
+      inflight.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [clearSession]);
 
   useEffect(() => {
     if (!readToken()) {
@@ -96,9 +128,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    void api
+    void authService
       .session()
-      .then((info: SessionInfo) => {
+      .then((info) => {
         setUser(info.user);
         setPermissions(info.permissions);
       })
@@ -110,19 +142,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const signIn = useCallback(
-    async (email: string, password: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (email: string, password: string) => {
       try {
-        const res = await api.login(email, password);
+        const res = await authService.login(email, password);
         writeToken(res.token);
         setUser(res.user);
         setPermissions(res.permissions);
         setLoading(true);
         await refresh();
-        return { ok: true };
+        return { ok: true as const };
       } catch (err) {
         return {
-          ok: false,
-          error: err instanceof Error ? err.message : 'Unable to sign in. Please try again.',
+          ok: false as const,
+          error: err instanceof ApiError ? err.message : 'Unable to sign in. Please try again.',
         };
       }
     },
@@ -131,53 +163,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      await api.logout();
+      await authService.logout();
     } catch {
       /* the local session is cleared regardless */
     }
-    writeToken(null);
-    setUser(null);
-    setPermissions([]);
-    setSnap(null);
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
-  const can = useCallback(
-    (p: Permission) => permissions.includes(p),
+  const can = useCallback((p: Permission) => permissions.includes(p), [permissions]);
+  const canAny = useCallback(
+    (...list: Permission[]) => list.some((p) => permissions.includes(p)),
     [permissions],
   );
 
   /**
-   * Every mutation goes through here so the server stays the single source of
-   * truth: on success we toast then re-snapshot; on a guardrail rejection we
-   * surface the exact blocker the engine returned.
+   * Every mutation flows through here. The server is the source of truth, so a
+   * success is only reported after the snapshot has been re-read; a refusal is
+   * surfaced with the exact reason the engine gave.
    */
   const run = useCallback(
-    async <T,>(label: string, fn: () => Promise<T>, opts?: { success?: string }) => {
+    async <T,>(
+      label: string,
+      fn: () => Promise<T>,
+      opts?: { success?: string; detail?: string; action?: Toast['action'] },
+    ): Promise<OperationResult<T>> => {
       setBusy(true);
       try {
-        const out = await fn();
+        const data = await fn();
         await refresh();
-        notify({ kind: 'success', title: opts?.success ?? `${label} posted`, detail: label });
-        return out;
+        setRevision((r) => r + 1);
+        notify({
+          tone: 'success',
+          title: opts?.success ?? `${label} completed`,
+          detail: opts?.detail,
+          action: opts?.action,
+        });
+        return { ok: true, data };
       } catch (err) {
         const apiErr = err instanceof ApiError ? err : null;
-        if (apiErr?.status === 401) {
-          writeToken(null);
-          setUser(null);
-          setPermissions([]);
-        }
+        if (apiErr?.status === 401) clearSession();
+        const message = err instanceof Error ? err.message : String(err);
         notify({
-          kind: apiErr && apiErr.status === 422 ? 'warn' : 'error',
-          title: apiErr ? `${label} blocked` : `${label} failed`,
-          detail: err instanceof Error ? err.message : String(err),
+          tone: apiErr && (apiErr.status === 409 || apiErr.status === 422) ? 'warning' : 'error',
+          title: apiErr && apiErr.status >= 400 && apiErr.status < 500 ? `${label} was not completed` : `${label} failed`,
+          detail: message,
           blockers: apiErr?.blockers,
         });
-        return null;
+        return { ok: false, error: message, blockers: apiErr?.blockers };
       } finally {
         setBusy(false);
       }
     },
-    [refresh, notify],
+    [refresh, notify, clearSession],
   );
 
   const value = useMemo<AppState>(
@@ -188,8 +225,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loading,
       restoring,
       busy,
+      revision,
+      lastSyncAt,
       toasts,
       can,
+      canAny,
       signIn,
       signOut,
       refresh,
@@ -197,7 +237,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notify,
       dismiss,
     }),
-    [snap, user, permissions, loading, restoring, busy, toasts, can, signIn, signOut, refresh, run, notify, dismiss],
+    [
+      snap, user, permissions, loading, restoring, busy, revision, lastSyncAt, toasts,
+      can, canAny, signIn, signOut, refresh, run, notify, dismiss,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -209,19 +252,15 @@ export function useApp(): AppState {
   return ctx;
 }
 
-/** Snapshot accessor that narrows away the null case for pages behind the loader. */
+/** Snapshot with the null case removed. Only valid behind the app loader. */
 export function useSnap(): Snapshot {
   const { snap } = useApp();
   if (!snap) throw new Error('Snapshot not loaded');
   return snap;
 }
 
-/**
- * The signed-in user with the null case removed. Only valid inside the
- * authenticated shell, which is the only place these pages are mounted.
- */
 export function useUser(): User {
   const { user } = useApp();
-  if (!user) throw new Error('useUser must be used inside the authenticated shell');
+  if (!user) throw new Error('useUser must be used inside the signed-in shell');
   return user;
 }
