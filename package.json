@@ -1,0 +1,24 @@
+{
+  "name": "stocksense-erp",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "StockSense ERP - Enterprise Logistics & Inventory (React + Express)",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "node node_modules/concurrently/dist/bin/concurrently.js -n API,WEB -c magenta,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node node_modules/tsx/dist/cli.mjs watch server/src/index.ts",
+    "dev:client": "node node_modules/vite/bin/vite.js --config client/vite.config.ts",
+    "build": "node node_modules/typescript/bin/tsc -p client/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p server/tsconfig.json && node node_modules/vite/bin/vite.js build --config client/vite.config.ts",
+    "start": "node server/dist/index.js",
+    "typecheck": "node node_modules/typescript/bin/tsc -p client/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p server/tsconfig.json --noEmit",
+    "smoke": "node server/scripts/smoke.mjs",
+    "reset": "node -e \"import('./server/dist/store.js').then(m=>{m.hardReset();console.log('Database reseeded.')})\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
