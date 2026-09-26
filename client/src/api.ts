@@ -133,6 +133,10 @@ export const api = {
   settings: () => get<Snapshot['settings']>('/settings'),
   saveSettings: (body: Partial<Snapshot['settings']>) => patch<Snapshot['settings']>('/settings', body),
 
-  runScenario: (_user?: string) =>
-    post<{ action: string; message: string; ref: string }>('/scenario/run'),
-};
+    runScenario: () =>
+      post<{ action: string; message: string; ref: string }>('/scenario/run'),
+    startDrill: () =>
+      post<{ rewound: number; entries: number; balance: number; message: string }>(
+        '/scenario/start-drill',
+      ),
+  };

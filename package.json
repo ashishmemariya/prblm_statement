@@ -6,16 +6,25 @@
   "description": "StockSense ERP - Enterprise Logistics & Inventory (React + Express)",
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "frontend",
+    "backend"
   ],
   "scripts": {
     "dev": "node node_modules/concurrently/dist/bin/concurrently.js -n API,WEB -c magenta,cyan \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "node node_modules/tsx/dist/cli.mjs watch server/src/index.ts",
     "dev:client": "node node_modules/vite/bin/vite.js --config client/vite.config.ts",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:all": "npm run dev --workspace=frontend & npm run dev --workspace=backend",
     "build": "node node_modules/typescript/bin/tsc -p client/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p server/tsconfig.json && node node_modules/vite/bin/vite.js build --config client/vite.config.ts",
+    "build:frontend": "npm run build --workspace frontend",
     "start": "node server/dist/index.js",
+    "preview": "npm run preview --workspace frontend",
     "typecheck": "node node_modules/typescript/bin/tsc -p client/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p server/tsconfig.json --noEmit",
     "smoke": "node server/scripts/smoke.mjs",
+    "browser": "node scripts/browser-check.mjs",
+    "verify": "npm run typecheck && npm run smoke && npm run browser",
     "reset": "node -e \"import('./server/dist/store.js').then(m=>{m.hardReset();console.log('Database reseeded.')})\""
   },
   "devDependencies": {

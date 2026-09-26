@@ -1,14 +1,69 @@
-export type Unit = 'kg' | 'Units' | 'Rolls' | 'spools' | 'packs';
+export type Unit = 'kg' | 'Units' | 'Rolls';
 export type ProductStatus = 'IN_STOCK' | 'LOW' | 'OUT';
+/**
+ * Mirrors the server's `status.ts`. `Overdue` is not a status: a late document
+ * stays in its own step and carries a derived `attention` flag instead.
+ */
 export type DocStatus =
   | 'Draft'
   | 'Waiting'
   | 'Ready'
+  | 'Picking'
   | 'Packed'
+  | 'In Transit'
   | 'Done'
-  | 'Overdue'
   | 'Canceled';
-export type LedgerType = 'RECEIPT' | 'DELIVERY' | 'TRANSFER' | 'ADJUSTMENT';
+
+export type AttentionKind = 'Overdue' | 'Awaiting approval' | 'Draft' | 'Blocked';
+
+export interface Attention {
+  kind: AttentionKind;
+  message: string;
+  daysLate: number;
+}
+
+/** Fields the API adds to every document it returns. */
+export interface DocumentMeta {
+  attention: Attention | null;
+  stepIndex: number;
+  stepCount: number;
+}
+
+export interface StatusFlows {
+  receipt: readonly string[];
+  delivery: readonly string[];
+  transfer: readonly string[];
+  adjustment: readonly string[];
+}
+
+export interface DocColumn {
+  key: string;
+  label: string;
+  icon: string;
+}
+
+/**
+ * `Overdue` is not a board column or a status — it is the derived attention
+ * lane, so it matches on `attention` rather than on the stored status.
+ */
+export function isAttentionKey(key: string): key is 'Overdue' {
+  return key === 'Overdue';
+}
+
+export function docMatchesColumn(
+  doc: { status?: string; state?: string; attention?: Attention | null },
+  key: string,
+): boolean {
+  if (isAttentionKey(key)) return doc.attention?.kind === 'Overdue';
+  return (doc.status ?? doc.state) === key;
+}
+export type LedgerType =
+  | 'OPENING'
+  | 'RECEIPT'
+  | 'DELIVERY'
+  | 'TRANSFER'
+  | 'ADJUSTMENT'
+  | 'REVERSAL';
 export type AdjustmentReason =
   | 'Damaged in Transit'
   | 'Missing / Investigation'
@@ -16,7 +71,7 @@ export type AdjustmentReason =
   | 'Scrap / Wear & Tear'
   | 'Supplier Surplus'
   | 'Other';
-export type AdjustmentState = 'Pending Approval' | 'Reconciled' | 'Posted';
+export type AdjustmentState = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Canceled';
 
 export interface Product {
   id: string;
@@ -51,7 +106,7 @@ export interface ReceiptLine {
   variance: number;
 }
 
-export interface Receipt {
+export interface Receipt extends DocumentMeta {
   ref: string;
   supplier: string;
   supplierTier: 'Tier 1 Vendor' | 'Tier 2 Vendor' | 'Unverified';
@@ -88,7 +143,7 @@ export interface DeliveryLine {
   value: number;
 }
 
-export interface Delivery {
+export interface Delivery extends DocumentMeta {
   ref: string;
   from: string;
   to: string;
@@ -108,7 +163,7 @@ export interface Delivery {
   totalValue?: number;
 }
 
-export interface Transfer {
+export interface Transfer extends DocumentMeta {
   ref: string;
   from: string;
   to: string;
@@ -119,7 +174,7 @@ export interface Transfer {
   createdAt: string;
 }
 
-export interface Adjustment {
+export interface Adjustment extends DocumentMeta {
   ref: string;
   sku: string;
   location: string;
@@ -258,6 +313,9 @@ export interface DashboardSummary {
   doneDeliveries: number;
   overdueDeliveries: number;
   lateReceipts: number;
+  lateTransfers: number;
+  /** documents past their scheduled slot, summed across all kinds */
+  overdueCount: number;
   scheduledTransfers: number;
   pendingAdjustments: number;
   ledgerEntries: number;
@@ -276,7 +334,9 @@ export interface ScenarioState {
   steps: ScenarioStep[];
   currentStep: number;
   complete: boolean;
-  steel: { sku: string; total: number; stock1: number; production: number; rackA: number } | null;
+  /** true once the drill has been rewound and not yet finished */
+  started: boolean;
+  steel: { sku: string; total: number; rack: number; production: number } | null;
   refs: { receipt: string; transfer: string; delivery: string; adjustment: string };
 }
 

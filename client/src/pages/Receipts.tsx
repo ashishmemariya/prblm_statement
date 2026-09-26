@@ -13,15 +13,18 @@ import {
   Segmented,
   StatusBadge,
 } from '../components/ui';
-import type { DocStatus, Receipt } from '../types';
+import type { DocColumn, Receipt } from '../types';
+import { docMatchesColumn } from '../types';
 
-const COLUMNS: { key: DocStatus; label: string; icon: string }[] = [
+const COLUMNS: DocColumn[] = [
   { key: 'Draft', label: 'Draft', icon: 'edit_note' },
   { key: 'Waiting', label: 'Waiting', icon: 'hourglass_top' },
   { key: 'Ready', label: 'Ready to receive', icon: 'move_to_inbox' },
-  { key: 'Overdue', label: 'Overdue', icon: 'warning' },
   { key: 'Done', label: 'Received', icon: 'task_alt' },
 ];
+
+/** Board columns are the flow; the Overdue lane is a derived attention filter. */
+const CHIPS = ['All', ...COLUMNS.map((c) => c.key), 'Overdue'];
 
 const TIER_TONE = {
   'Tier 1 Vendor': 'success',
@@ -59,14 +62,14 @@ export default function Receipts() {
         <label className="block min-w-44">
           <span className="mb-1 block text-[11px] font-bold tracking-wide text-on-surface/60 uppercase">Status</span>
           <select value={status} onChange={(e) => setStatus(e.target.value)} className="field">
-            {['All', ...COLUMNS.map((c) => c.key)].map((s) => (
+            {CHIPS.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
         </label>
         <div className="flex flex-wrap gap-4 border-l border-outline-variant pl-4 text-[11.5px]">
           {COLUMNS.map((c) => {
-            const n = snap.receipts.filter((r) => r.status === c.key).length;
+            const n = snap.receipts.filter((r) => docMatchesColumn(r, c.key)).length;
             return (
               <span key={c.key} className="text-on-surface/55">
                 <b className="tnum block text-[15px] text-on-surface">{n}</b>
@@ -147,7 +150,7 @@ export default function Receipts() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {COLUMNS.map((col) => {
-            const items = rows.filter((r) => r.status === col.key);
+            const items = rows.filter((r) => docMatchesColumn(r, col.key));
             return (
               <div key={col.key} className="flex min-h-40 flex-col rounded-xl border border-outline-variant bg-surface-low p-2">
                 <div className="mb-2 flex items-center gap-1.5 px-1">

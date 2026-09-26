@@ -60,34 +60,60 @@ export function Toasts() {
  * mutation, so the numbers on screen are the numbers the server holds.
  */
 export function ScenarioBar() {
-  const { snap, run, busy } = useApp();
+  const { snap, run, busy, can } = useApp();
   const sc = snap?.scenario;
   if (!sc) return null;
 
+  const mayDrill = can('demo.reset');
+
   const onRun = () =>
-    void run('Scenario step', () => api.runScenario(), { success: 'Scenario advanced' });
+    void run('Lifecycle step', () => api.runScenario(), { success: 'Lifecycle drill advanced' });
+
+  const onRewind = () =>
+    void run('Rewind the drill', () => api.startDrill(), {
+      success: 'Drill rewound — the rack is empty and step 1 is ready.',
+    });
 
   const onReset = () =>
-    void run('Demo reset', () => api.reset(), { success: 'Seed data restored' });
+    void run('Restore seed', () => api.reset(), { success: 'Canonical seed restored' });
 
   return (
     <div className="mb-5 overflow-hidden rounded-xl border border-outline-variant bg-surface-lowest">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-outline-variant bg-surface-low px-4 py-2.5">
         <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-[0.12em] text-primary uppercase">
           <Icon name="science" size={16} fill />
-          Guided audit walkthrough
+          Lifecycle drill
         </span>
         <span className="text-[11.5px] text-on-surface/60">
-          Receive 100&nbsp;kg → transfer to production → deliver 20&nbsp;kg → post a −3&nbsp;kg count variance
+          {sc.complete
+            ? 'The seeded system already shows the finished lifecycle. Rewind it to run the four steps by hand.'
+            : 'Receive 100 kg → transfer to production → deliver 20 kg → post a −3 kg count variance'}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <button className="btn btn-outline !py-1.5" onClick={onReset} disabled={busy}>
-            <Icon name="restart_alt" size={15} />
-            Reset demo
-          </button>
+          {mayDrill && (
+            <button className="btn btn-outline !py-1.5" onClick={onReset} disabled={busy}>
+              <Icon name="restart_alt" size={15} />
+              Restore seed
+            </button>
+          )}
+          {mayDrill && (
+            <button
+              className="btn btn-outline !py-1.5"
+              onClick={onRewind}
+              disabled={busy || !sc.complete}
+              title={
+                sc.complete
+                  ? 'Rewind the four documents to an empty rack'
+                  : 'Already rewound — restore the seed first'
+              }
+            >
+              <Icon name="undo" size={15} />
+              Start the drill
+            </button>
+          )}
           <button className="btn btn-primary !py-1.5" onClick={onRun} disabled={busy || sc.complete}>
             <Icon name={sc.complete ? 'task_alt' : 'play_arrow'} size={16} fill />
-            {sc.complete ? 'Walkthrough complete' : `Run step ${sc.currentStep + 1}`}
+            {sc.complete ? 'Drill complete' : `Run step ${sc.currentStep + 1}`}
           </button>
         </div>
       </div>
@@ -134,12 +160,12 @@ export function ScenarioBar() {
           </span>
           <span className="tnum">
             <Link to="/warehouse" className="text-tertiary hover:underline">
-              WH/Stock1 <b>{sc.steel.stock1}</b>
+              Heavy-Rack-01 <b>{sc.steel.rack}</b>
             </Link>
           </span>
           <span className="tnum">
             <Link to="/warehouse" className="text-tertiary hover:underline">
-              WH/Production <b>{sc.steel.production}</b>
+              WH-Production <b>{sc.steel.production}</b>
             </Link>
           </span>
           {sc.steel.total === 0 && (

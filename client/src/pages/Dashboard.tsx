@@ -15,7 +15,9 @@ export default function Dashboard() {
     {
       label: 'Inventory value',
       value: money(d.valuation, snap.settings.currency),
-      sub: `${d.catalogSkus} active SKUs · ${d.totalOnHand.toLocaleString('en-IN')} units on hand`,
+      // Quantities span kg, units and rolls, so the total is deliberately not
+      // labelled "units" — that would misstate eight of the ten SKUs.
+      sub: `${d.catalogSkus} active SKUs · ${d.totalOnHand.toLocaleString('en-IN')} on hand (mixed UoM)`,
       icon: 'account_balance_wallet',
       tone: 'plum' as const,
       to: '/products',
@@ -57,16 +59,28 @@ export default function Dashboard() {
       cta: p.total === 0 ? 'Replenish' : 'Review',
     })),
     ...snap.deliveries
-      .filter((x) => x.status === 'Overdue')
+      .filter((x) => x.attention?.kind === 'Overdue')
       .slice(0, 2)
       .map((x) => ({
         key: x.ref,
         to: `/deliveries/${encodeURIComponent(x.ref)}`,
         icon: 'warning',
         title: `${x.ref} overdue`,
-        meta: `${x.items.length} line(s) to ${x.contact} · scheduled ${x.scheduledDate}`,
-        status: 'Overdue' as const,
+        meta: `${x.items.length} line(s) to ${x.contact} · ${x.attention?.message ?? ''}`,
+        status: x.status,
         cta: 'Reallocate',
+      })),
+    ...snap.receipts
+      .filter((x) => x.attention?.kind === 'Overdue')
+      .slice(0, 1)
+      .map((x) => ({
+        key: x.ref,
+        to: `/receipts/${encodeURIComponent(x.ref)}`,
+        icon: 'warning',
+        title: `${x.ref} overdue`,
+        meta: `${x.items.length} line(s) from ${x.supplier} · ${x.attention?.message ?? ''}`,
+        status: x.status,
+        cta: 'Chase',
       })),
     ...snap.adjustments
       .filter((a) => a.state === 'Pending Approval')

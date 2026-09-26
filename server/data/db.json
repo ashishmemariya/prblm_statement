@@ -1,0 +1,896 @@
+{
+  "version": 3,
+  "settings": {
+    "valuationMethod": "FIFO",
+    "removalStrategy": "FIFO",
+    "preventNegativeStock": true,
+    "dualSignoffThreshold": 5000,
+    "dualSignoffVariancePct": 2.5,
+    "currency": "₹"
+  },
+  "users": [
+    {
+      "id": "U-1001",
+      "name": "Rahul Sharma",
+      "email": "demo@stocksense.app",
+      "role": "Inventory Manager",
+      "title": "Inventory Manager",
+      "initials": "RS",
+      "auditorId": "8821",
+      "active": true
+    },
+    {
+      "id": "U-1002",
+      "name": "Priya Patel",
+      "email": "priya@stocksense.app",
+      "role": "Warehouse Staff",
+      "title": "Warehouse Associate",
+      "initials": "PP",
+      "auditorId": "8834",
+      "active": true
+    },
+    {
+      "id": "U-1003",
+      "name": "Arjun Verma",
+      "email": "arjun@stocksense.app",
+      "role": "Floor Supervisor",
+      "title": "Floor Supervisor",
+      "initials": "AV",
+      "auditorId": "8840",
+      "active": true
+    },
+    {
+      "id": "U-1004",
+      "name": "Sana Kapoor",
+      "email": "admin@stocksense.app",
+      "role": "Admin",
+      "title": "Systems Administrator",
+      "initials": "SK",
+      "auditorId": "8801",
+      "active": true
+    }
+  ],
+  "credentials": [
+    {
+      "userId": "U-1001",
+      "salt": "632a105ba69cd4d6acee17118bf76c87",
+      "hash": "4d242489f17b77a1c503729a34aa43389fcbaf33f309ecab428f618b686e30784b1ae0bf4eadb2ca2bf368a4c7075365ac5b16c0e5efc19951a0fc74bfbe33f4"
+    },
+    {
+      "userId": "U-1002",
+      "salt": "a87716b1aeb8121ea987ef7876f42556",
+      "hash": "18ea28d8bae1c0a54bc70c50212cebe42d9c8f023429353880884293ff5785e915020e6eca577b2adc1c3e1b98a51fd05403c9f77d0c346c2556c9763e2e6070"
+    },
+    {
+      "userId": "U-1003",
+      "salt": "dba49c0b2225be0e3b2ebd9aaf8471bf",
+      "hash": "44314b10410c23ed0a010b7313ea9b78a5a16250ece9b00b75bf08f854a4c3c6dc3ebdc236b9e37cc5f2a8e593fe061116055ed55f973fa4c090462a996a2e34"
+    },
+    {
+      "userId": "U-1004",
+      "salt": "175ccaa85d56afaf98635ed4f62ac270",
+      "hash": "59f259379e4ef95ffdf7afd2a882029b977b7d353d3b76951194d7f612a467c4b4cd7cace8bd1ffecb9ef07766c073c3bb59d31fd2dadbd782659eb276e1b3ba"
+    }
+  ],
+  "warehouses": [
+    {
+      "code": "WH-01",
+      "name": "Central Warehouse",
+      "type": "Main Fulfillment",
+      "address": "104 Logistics Parkway, Industrial Sector 4, North Cargo Gate",
+      "manager": "Rahul S.",
+      "capacityUsedPct": 78,
+      "locationCount": 6
+    },
+    {
+      "code": "WH-02-CS",
+      "name": "Cold Storage Zone A",
+      "type": "Cold Chain",
+      "address": "Pier 9 Cold Chain Facility, Berth 3",
+      "manager": "Elena Rostova",
+      "capacityUsedPct": 31,
+      "locationCount": 1
+    },
+    {
+      "code": "WH-03-PR",
+      "name": "Production Inward Staging",
+      "type": "Transit Hub",
+      "address": "Plant 2 Assembly Wing, Sector B",
+      "manager": "K. Tanaka",
+      "capacityUsedPct": 64,
+      "locationCount": 1
+    }
+  ],
+  "locations": [
+    {
+      "code": "WH/Stock",
+      "name": "Main Stock Area",
+      "shortCode": "STK-01",
+      "warehouse": "WH-01",
+      "container": true,
+      "type": "Internal Storage",
+      "skuCount": 6,
+      "maxLoad": "17,500 kg",
+      "status": "Active"
+    },
+    {
+      "code": "WH/Stock/Heavy-Rack-01",
+      "name": "Heavy Pallet Rack 01",
+      "shortCode": "HR-01",
+      "warehouse": "WH-01",
+      "parent": "WH/Stock",
+      "container": false,
+      "type": "Heavy Floor",
+      "skuCount": 2,
+      "maxLoad": "12,500 kg",
+      "status": "Active"
+    },
+    {
+      "code": "WH/Stock/Bay-04",
+      "name": "Main Stacks / Bay 04 / Shelf B",
+      "shortCode": "B04-SB",
+      "warehouse": "WH-01",
+      "parent": "WH/Stock",
+      "container": false,
+      "type": "Internal Storage",
+      "skuCount": 5,
+      "maxLoad": "5,000 kg",
+      "status": "Active"
+    },
+    {
+      "code": "WH-Rack-A",
+      "name": "Heavy Materials Rack A",
+      "shortCode": "RCK-A",
+      "warehouse": "WH-01",
+      "container": true,
+      "type": "Heavy Floor",
+      "skuCount": 2,
+      "maxLoad": "15,000 kg",
+      "status": "Active"
+    },
+    {
+      "code": "WH/Input",
+      "name": "Inward Staging Dock",
+      "shortCode": "IN-01",
+      "warehouse": "WH-01",
+      "container": true,
+      "type": "Inward Dock",
+      "skuCount": 1,
+      "maxLoad": "Staging 48h",
+      "status": "Receiving"
+    },
+    {
+      "code": "WH/Output",
+      "name": "Outward Dispatch",
+      "shortCode": "OUT-01",
+      "warehouse": "WH-01",
+      "container": true,
+      "type": "Outward Pack",
+      "skuCount": 0,
+      "maxLoad": "Ready",
+      "status": "Ready"
+    },
+    {
+      "code": "WH-Production",
+      "name": "Production Staging",
+      "shortCode": "PRD-01",
+      "warehouse": "WH-03-PR",
+      "container": true,
+      "type": "Internal Storage",
+      "skuCount": 1,
+      "maxLoad": "8,000 kg",
+      "status": "Receiving"
+    },
+    {
+      "code": "WH-Cold-Zone",
+      "name": "Cold Chain Zone",
+      "shortCode": "CLD-A",
+      "warehouse": "WH-02-CS",
+      "container": true,
+      "type": "Cold Chain",
+      "skuCount": 0,
+      "maxLoad": "2,200 kg",
+      "status": "Chill Pass"
+    },
+    {
+      "code": "WH/Quarantine",
+      "name": "Quarantine & Inspection Hold",
+      "shortCode": "QRN-01",
+      "warehouse": "WH-01",
+      "container": false,
+      "type": "Quarantine",
+      "skuCount": 0,
+      "maxLoad": "—",
+      "status": "Locked"
+    }
+  ],
+  "products": [
+    {
+      "id": "PROD-01",
+      "name": "Steel Rods 12mm High Tensile",
+      "sku": "STL-ROD-12",
+      "category": "Raw Materials",
+      "unit": "kg",
+      "unitCost": 1210,
+      "reorderPoint": 30,
+      "reserved": 0,
+      "stock": {
+        "WH-Production": 77
+      },
+      "icon": "carpenter"
+    },
+    {
+      "id": "PROD-02",
+      "name": "Ergonomic Executive Desk",
+      "sku": "DESK-CHR-01",
+      "category": "Furniture",
+      "unit": "Units",
+      "unitCost": 10200,
+      "reorderPoint": 8,
+      "reserved": 6,
+      "stock": {
+        "WH/Stock/Bay-04": 24
+      },
+      "icon": "table_restaurant"
+    },
+    {
+      "id": "PROD-03",
+      "name": "Samsung SSD 1TB",
+      "sku": "SSD-SAM-1TB",
+      "category": "Computer Hardware",
+      "unit": "Units",
+      "unitCost": 4300,
+      "reorderPoint": 10,
+      "reserved": 0,
+      "stock": {
+        "WH/Stock/Bay-04": 38
+      },
+      "icon": "memory"
+    },
+    {
+      "id": "PROD-04",
+      "name": "Kingston DDR4 RAM 16GB",
+      "sku": "RAM-KNG-16",
+      "category": "Computer Hardware",
+      "unit": "Units",
+      "unitCost": 2300,
+      "reorderPoint": 12,
+      "reserved": 0,
+      "stock": {
+        "WH/Stock/Bay-04": 48
+      },
+      "icon": "developer_board"
+    },
+    {
+      "id": "PROD-05",
+      "name": "Dell UltraSharp 24\" Monitor",
+      "sku": "MON-DEL-24",
+      "category": "Computer Hardware",
+      "unit": "Units",
+      "unitCost": 11800,
+      "reorderPoint": 12,
+      "reserved": 0,
+      "stock": {
+        "WH/Stock/Bay-04": 9
+      },
+      "icon": "monitor"
+    },
+    {
+      "id": "PROD-06",
+      "name": "Industrial 2D Barcode Scanner",
+      "sku": "SCN-IND-2D",
+      "category": "Electronics",
+      "unit": "Units",
+      "unitCost": 7900,
+      "reorderPoint": 10,
+      "reserved": 0,
+      "stock": {
+        "WH-Rack-A": 27
+      },
+      "icon": "qr_code_scanner"
+    },
+    {
+      "id": "PROD-07",
+      "name": "Logitech Wireless Mouse M185",
+      "sku": "ACC-LOG-M18",
+      "category": "Accessories",
+      "unit": "Units",
+      "unitCost": 490,
+      "reorderPoint": 40,
+      "reserved": 0,
+      "stock": {
+        "WH/Stock/Bay-04": 32
+      },
+      "icon": "mouse"
+    },
+    {
+      "id": "PROD-08",
+      "name": "Cat6 Ethernet Cable 305m",
+      "sku": "CAB-CAT6-305",
+      "category": "Networking",
+      "unit": "Rolls",
+      "unitCost": 1020,
+      "reorderPoint": 24,
+      "reserved": 2,
+      "stock": {
+        "WH-Rack-A": 20
+      },
+      "icon": "cable"
+    },
+    {
+      "id": "PROD-09",
+      "name": "Thermal Shipping Label Roll 4x6",
+      "sku": "LBL-THM-406",
+      "category": "Office Supplies",
+      "unit": "Rolls",
+      "unitCost": 240,
+      "reorderPoint": 48,
+      "reserved": 0,
+      "stock": {
+        "WH/Stock/Bay-04": 40
+      },
+      "icon": "print"
+    },
+    {
+      "id": "PROD-10",
+      "name": "Heavy Copper Conduit 50m",
+      "sku": "COP-WIR-50",
+      "category": "Raw Materials",
+      "unit": "Rolls",
+      "unitCost": 1250,
+      "reorderPoint": 8,
+      "reserved": 0,
+      "stock": {
+        "WH-Rack-A": 16
+      },
+      "icon": "cable"
+    }
+  ],
+  "receipts": [
+    {
+      "ref": "RC-1001",
+      "supplier": "Apex Metallurgical Ltd",
+      "supplierTier": "Tier 1 Vendor",
+      "poRef": "PO-2026-8891",
+      "bolRef": "BOL-88421",
+      "destination": "WH/Stock/Heavy-Rack-01",
+      "contact": "Marcus Vance",
+      "scheduledDate": "2026-03-02 10:30",
+      "carrier": "SwiftTrans Logistics #44",
+      "dockBay": "BAY-02 North",
+      "status": "Done",
+      "items": [
+        {
+          "sku": "STL-ROD-12",
+          "expected": 100,
+          "received": 100,
+          "bin": "WH/Stock/Heavy-Rack-01",
+          "lot": "HT-99120-X",
+          "barcode": "749021884102"
+        }
+      ],
+      "notes": "Pallets intact (2/2). Zero transit damage. Security seal matched.",
+      "createdAt": "2026-03-02 08:15",
+      "createdBy": "Rahul Sharma",
+      "postedAt": "2026-03-02 10:44"
+    },
+    {
+      "ref": "RC-1002",
+      "supplier": "LogiTech Dynamics",
+      "supplierTier": "Tier 2 Vendor",
+      "poRef": "PO-2026-8907",
+      "bolRef": "BOL-88502",
+      "destination": "WH-Rack-A",
+      "contact": "Marcus Vance",
+      "scheduledDate": "2026-06-18 09:15",
+      "carrier": "Internal Shuttle",
+      "dockBay": "BAY-01 North",
+      "status": "Done",
+      "items": [
+        {
+          "sku": "SCN-IND-2D",
+          "expected": 7,
+          "received": 7,
+          "bin": "WH-Rack-A",
+          "lot": "SC-1192",
+          "barcode": "4710781983211"
+        }
+      ],
+      "notes": "Dock check-in complete. Carton count reconciled against BOL.",
+      "createdAt": "2026-06-18 07:20",
+      "createdBy": "Priya Patel",
+      "postedAt": "2026-06-18 09:31"
+    },
+    {
+      "ref": "RC-1003",
+      "supplier": "Nordic Raw Materials",
+      "supplierTier": "Unverified",
+      "poRef": "PO-2026-8912",
+      "bolRef": "—",
+      "destination": "WH/Input",
+      "contact": "Elias Lind",
+      "scheduledDate": "2026-09-27 11:00",
+      "carrier": "—",
+      "dockBay": "Unassigned",
+      "status": "Draft",
+      "items": [
+        {
+          "sku": "COP-WIR-50",
+          "expected": 8,
+          "received": 0,
+          "bin": "WH/Input",
+          "lot": "PENDING",
+          "barcode": "—"
+        }
+      ],
+      "notes": "Draft awaiting PO confirmation.",
+      "createdAt": "2026-09-25 07:02",
+      "createdBy": "Priya Patel"
+    },
+    {
+      "ref": "RC-1004",
+      "supplier": "Precision Hydraulics",
+      "supplierTier": "Tier 2 Vendor",
+      "poRef": "PO-2026-8842",
+      "bolRef": "BOL-88012",
+      "destination": "WH/Stock/Bay-04",
+      "contact": "David Klemper",
+      "scheduledDate": "2026-09-24 09:00",
+      "carrier": "Internal Shuttle",
+      "dockBay": "Unassigned",
+      "status": "Waiting",
+      "items": [
+        {
+          "sku": "RAM-KNG-16",
+          "expected": 24,
+          "received": 0,
+          "bin": "WH/Stock/Bay-04",
+          "lot": "RAM-4410",
+          "barcode": "0742533912665"
+        }
+      ],
+      "notes": "Inbound on schedule. Awaiting dock assignment.",
+      "createdAt": "2026-09-22 10:00",
+      "createdBy": "Rahul Sharma"
+    }
+  ],
+  "deliveries": [
+    {
+      "ref": "WH/OUT/0001",
+      "from": "WH-Production",
+      "to": "Azure Interior",
+      "contact": "Marcus Vance",
+      "address": "452 Industrial Parkway, Sector 9",
+      "scheduledDate": "2026-03-04 14:00",
+      "carrier": "BlueDart Express",
+      "status": "Done",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "STL-ROD-12",
+          "qty": 20,
+          "bin": "WH-Production"
+        }
+      ],
+      "notes": "Dispatch validated against released work order. POD captured.",
+      "createdAt": "2026-03-04 07:40",
+      "createdBy": "Rahul Sharma",
+      "postedAt": "2026-03-04 15:12"
+    },
+    {
+      "ref": "WH/OUT/0002",
+      "from": "WH/Stock/Bay-04",
+      "to": "Deco Addict",
+      "contact": "Elias Lind",
+      "address": "7 Riverside Design Park",
+      "scheduledDate": "2026-05-11 09:00",
+      "carrier": "DHL Express",
+      "status": "Done",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "DESK-CHR-01",
+          "qty": 6,
+          "bin": "B04-SB"
+        }
+      ],
+      "notes": "Delivered and signed off.",
+      "createdAt": "2026-05-11 08:05",
+      "createdBy": "Arjun Verma",
+      "postedAt": "2026-05-11 11:40"
+    },
+    {
+      "ref": "WH/OUT/0003",
+      "from": "WH/Stock/Bay-04",
+      "to": "TechNova Global",
+      "contact": "Rachel Green",
+      "address": "Unit 22, Tech Park Block C",
+      "scheduledDate": "2026-07-02 11:30",
+      "carrier": "FedEx Freight",
+      "status": "Done",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "SSD-SAM-1TB",
+          "qty": 2,
+          "bin": "B04-SB"
+        }
+      ],
+      "notes": "Delivered and signed off.",
+      "createdAt": "2026-07-02 09:30",
+      "createdBy": "Arjun Verma",
+      "postedAt": "2026-07-02 14:05"
+    },
+    {
+      "ref": "WH/OUT/0004",
+      "from": "WH-Rack-A",
+      "to": "Lumber & Co",
+      "contact": "Nathan Brooks",
+      "address": "88 Sawmill Road",
+      "scheduledDate": "2026-08-14 10:15",
+      "carrier": "Internal Shuttle",
+      "status": "Done",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "COP-WIR-50",
+          "qty": 2,
+          "bin": "Bay 02-Rack 09"
+        }
+      ],
+      "notes": "Delivered and signed off.",
+      "createdAt": "2026-08-14 08:00",
+      "createdBy": "Arjun Verma",
+      "postedAt": "2026-08-14 12:22"
+    },
+    {
+      "ref": "WH/OUT/0005",
+      "from": "WH/Stock/Bay-04",
+      "to": "Azure Interior",
+      "contact": "Sarah Connor",
+      "address": "452 Industrial Parkway, Sector 9",
+      "scheduledDate": "2026-09-27 16:30",
+      "carrier": "Unassigned",
+      "status": "Draft",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "LBL-THM-406",
+          "qty": 6,
+          "bin": "B04-SB"
+        }
+      ],
+      "notes": "Draft — awaiting stock release.",
+      "createdAt": "2026-09-25 09:12",
+      "createdBy": "Priya Patel"
+    },
+    {
+      "ref": "WH/OUT/0006",
+      "from": "WH/Stock/Bay-04",
+      "to": "Northwind Retail",
+      "contact": "Liam Davies",
+      "address": "3 Harbour Freight Terminals",
+      "scheduledDate": "2026-09-26 13:00",
+      "carrier": "BlueDart Express",
+      "status": "Ready",
+      "operationType": "WH: Delivery Orders (Sales Orders)",
+      "items": [
+        {
+          "sku": "ACC-LOG-M18",
+          "qty": 8,
+          "bin": "B04-SB"
+        }
+      ],
+      "notes": "Reserved and staged for afternoon collection.",
+      "createdAt": "2026-09-26 08:05",
+      "createdBy": "Priya Patel"
+    }
+  ],
+  "transfers": [
+    {
+      "ref": "TR-2001",
+      "from": "WH/Stock/Heavy-Rack-01",
+      "to": "WH-Production",
+      "sku": "STL-ROD-12",
+      "qty": 100,
+      "requestedBy": "Priya Patel",
+      "status": "Done",
+      "scheduledDate": "2026-03-02 11:20",
+      "createdAt": "2026-03-02 11:20",
+      "postedAt": "2026-03-02 12:05"
+    },
+    {
+      "ref": "TR-2002",
+      "from": "WH/Stock",
+      "to": "WH-Production",
+      "sku": "DESK-CHR-01",
+      "qty": 4,
+      "requestedBy": "Rahul Sharma",
+      "status": "Waiting",
+      "scheduledDate": "2026-09-26 15:00",
+      "createdAt": "2026-09-26 07:30"
+    },
+    {
+      "ref": "TR-2003",
+      "from": "WH/Input",
+      "to": "WH/Quarantine",
+      "sku": "COP-WIR-50",
+      "qty": 4,
+      "requestedBy": "Priya Patel",
+      "status": "Draft",
+      "scheduledDate": "2026-09-28 10:00",
+      "createdAt": "2026-09-25 16:20"
+    }
+  ],
+  "adjustments": [
+    {
+      "ref": "ADJ-4001",
+      "sku": "STL-ROD-12",
+      "location": "WH-Production",
+      "recorded": 80,
+      "counted": 77,
+      "delta": -3,
+      "reason": "Scrap / Wear & Tear",
+      "memo": "Physical count confirmed twice via mechanical scales. Scrap rods set aside for salvage logging.",
+      "auditor": "Rahul Sharma",
+      "state": "Posted",
+      "valuationImpact": -3630,
+      "createdAt": "2026-03-04 16:40",
+      "postedAt": "2026-03-05 09:10"
+    },
+    {
+      "ref": "ADJ-4002",
+      "sku": "COP-WIR-50",
+      "location": "WH-Rack-A",
+      "recorded": 18,
+      "counted": 16,
+      "delta": -2,
+      "reason": "Incorrect Entry / Counting Error",
+      "memo": "Cycle count found 2 spools recorded in Bay 02 that are physically in Bay 09. Re-binned during the count.",
+      "auditor": "Priya Patel",
+      "state": "Pending Approval",
+      "valuationImpact": 0,
+      "createdAt": "2026-09-26 09:31"
+    }
+  ],
+  "ledger": [
+    {
+      "id": "LG-0017",
+      "timestamp": "2026-08-14 12:22",
+      "type": "DELIVERY",
+      "ref": "WH/OUT/0004",
+      "sku": "COP-WIR-50",
+      "name": "Heavy Copper Conduit 50m",
+      "delta": -2,
+      "from": "WH-Rack-A",
+      "to": "Lumber & Co",
+      "balanceAfter": 16,
+      "user": "Arjun Verma",
+      "note": "Dispatch validated, POD captured."
+    },
+    {
+      "id": "LG-0016",
+      "timestamp": "2026-07-02 14:05",
+      "type": "DELIVERY",
+      "ref": "WH/OUT/0003",
+      "sku": "SSD-SAM-1TB",
+      "name": "Samsung SSD 1TB",
+      "delta": -2,
+      "from": "WH/Stock/Bay-04",
+      "to": "TechNova Global",
+      "balanceAfter": 38,
+      "user": "Arjun Verma",
+      "note": "Dispatch validated, POD captured."
+    },
+    {
+      "id": "LG-0015",
+      "timestamp": "2026-06-18 09:31",
+      "type": "RECEIPT",
+      "ref": "RC-1002",
+      "sku": "SCN-IND-2D",
+      "name": "Industrial 2D Barcode Scanner",
+      "delta": 7,
+      "from": "LogiTech Dynamics",
+      "to": "WH-Rack-A",
+      "balanceAfter": 27,
+      "user": "Priya Patel",
+      "note": "Goods received note posted."
+    },
+    {
+      "id": "LG-0014",
+      "timestamp": "2026-05-11 11:40",
+      "type": "DELIVERY",
+      "ref": "WH/OUT/0002",
+      "sku": "DESK-CHR-01",
+      "name": "Ergonomic Executive Desk",
+      "delta": -6,
+      "from": "WH/Stock/Bay-04",
+      "to": "Deco Addict",
+      "balanceAfter": 24,
+      "user": "Arjun Verma",
+      "note": "Dispatch validated, POD captured."
+    },
+    {
+      "id": "LG-0013",
+      "timestamp": "2026-03-05 09:10",
+      "type": "ADJUSTMENT",
+      "ref": "ADJ-4001",
+      "sku": "STL-ROD-12",
+      "name": "Steel Rods 12mm High Tensile",
+      "delta": -3,
+      "from": "WH-Production",
+      "to": "WH-Production",
+      "balanceAfter": 77,
+      "user": "Rahul Sharma",
+      "note": "Physical count confirmed twice via mechanical scales. Scrap rods set aside for salvage logging."
+    },
+    {
+      "id": "LG-0012",
+      "timestamp": "2026-03-04 15:12",
+      "type": "DELIVERY",
+      "ref": "WH/OUT/0001",
+      "sku": "STL-ROD-12",
+      "name": "Steel Rods 12mm High Tensile",
+      "delta": -20,
+      "from": "WH-Production",
+      "to": "Azure Interior",
+      "balanceAfter": 80,
+      "user": "Rahul Sharma",
+      "note": "Dispatch validated, POD captured."
+    },
+    {
+      "id": "LG-0011",
+      "timestamp": "2026-03-02 11:20",
+      "type": "TRANSFER",
+      "ref": "TR-2001",
+      "sku": "STL-ROD-12",
+      "name": "Steel Rods 12mm High Tensile",
+      "delta": 0,
+      "from": "WH/Stock/Heavy-Rack-01",
+      "to": "WH-Production",
+      "balanceAfter": 100,
+      "user": "Priya Patel",
+      "note": "Relocation — net-zero effect on the global balance."
+    },
+    {
+      "id": "LG-0010",
+      "timestamp": "2026-03-02 10:44",
+      "type": "RECEIPT",
+      "ref": "RC-1001",
+      "sku": "STL-ROD-12",
+      "name": "Steel Rods 12mm High Tensile",
+      "delta": 100,
+      "from": "Apex Metallurgical Ltd",
+      "to": "WH/Stock/Heavy-Rack-01",
+      "balanceAfter": 100,
+      "user": "Rahul Sharma",
+      "note": "Goods received note posted."
+    },
+    {
+      "id": "LG-0009",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "COP-WIR-50",
+      "name": "Heavy Copper Conduit 50m",
+      "delta": 18,
+      "from": "Opening balance",
+      "to": "WH-Rack-A",
+      "balanceAfter": 18,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0008",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "LBL-THM-406",
+      "name": "Thermal Shipping Label Roll 4x6",
+      "delta": 40,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 40,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0007",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "CAB-CAT6-305",
+      "name": "Cat6 Ethernet Cable 305m",
+      "delta": 20,
+      "from": "Opening balance",
+      "to": "WH-Rack-A",
+      "balanceAfter": 20,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0006",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "ACC-LOG-M18",
+      "name": "Logitech Wireless Mouse M185",
+      "delta": 32,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 32,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0005",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "SCN-IND-2D",
+      "name": "Industrial 2D Barcode Scanner",
+      "delta": 20,
+      "from": "Opening balance",
+      "to": "WH-Rack-A",
+      "balanceAfter": 20,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0004",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "MON-DEL-24",
+      "name": "Dell UltraSharp 24\" Monitor",
+      "delta": 9,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 9,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0003",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "RAM-KNG-16",
+      "name": "Kingston DDR4 RAM 16GB",
+      "delta": 48,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 48,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0002",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "SSD-SAM-1TB",
+      "name": "Samsung SSD 1TB",
+      "delta": 40,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 40,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    },
+    {
+      "id": "LG-0001",
+      "timestamp": "2026-01-01 00:00:00",
+      "type": "OPENING",
+      "ref": "OPENING-BALANCE",
+      "sku": "DESK-CHR-01",
+      "name": "Ergonomic Executive Desk",
+      "delta": 30,
+      "from": "Opening balance",
+      "to": "WH/Stock/Bay-04",
+      "balanceAfter": 30,
+      "user": "System",
+      "note": "Opening book balance carried forward from FY2025-26."
+    }
+  ]
+}

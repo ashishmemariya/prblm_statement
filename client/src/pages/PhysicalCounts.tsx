@@ -62,7 +62,7 @@ export default function PhysicalCounts() {
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         {[
           { label: 'Pending approval', value: snap.adjustments.filter((a) => a.state === 'Pending Approval').length, icon: 'pending_actions', tone: 'text-warning' },
-          { label: 'Reconciled, not posted', value: snap.adjustments.filter((a) => a.state === 'Reconciled').length, icon: 'rule', tone: 'text-tertiary' },
+          { label: 'Approved, not posted', value: snap.adjustments.filter((a) => a.state === 'Approved').length, icon: 'rule', tone: 'text-tertiary' },
           { label: 'Posted to ledger', value: snap.adjustments.filter((a) => a.state === 'Posted').length, icon: 'task_alt', tone: 'text-success' },
         ].map((k) => (
           <Card key={k.label} className="flex items-center gap-3 p-3.5">

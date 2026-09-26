@@ -2,11 +2,13 @@ import { randomBytes } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthSession, Permission, Role, User } from './types.js';
 import { getDb } from './store.js';
-import { HttpError } from './errors.js';
-import { hashPassword, verifyPassword } from './crypto.js';
+import { HttpError } from './engine.js';
+import { hashPassword, verifyPassword } from './password.js';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
 export { SESSION_TTL_MS };
+export { hashPassword, verifyPassword };
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -18,9 +20,11 @@ declare global {
   }
 }
 
-/* ------------------------------------------------------ role → capability */
+/* ------------------------------------------------------------------ *
+ * Role -> permission matrix
+ * ------------------------------------------------------------------ */
 
-const VIEWER_BASE: Permission[] = [
+const VIEWER: Permission[] = [
   'product.view',
   'receipt.view',
   'delivery.view',
@@ -29,12 +33,11 @@ const VIEWER_BASE: Permission[] = [
   'count.view',
   'ledger.view',
   'report.view',
-  'settings.view',
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   Admin: [
-    ...VIEWER_BASE,
+    ...VIEWER,
     'product.manage',
     'receipt.create',
     'receipt.post',
@@ -48,50 +51,43 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'count.create',
     'count.approve',
     'ledger.export',
-    'reorder.manage',
     'settings.manage',
     'diagnostics.view',
     'demo.reset',
+    'user.impersonate',
   ],
   'Inventory Manager': [
-    ...VIEWER_BASE,
+    ...VIEWER,
     'product.manage',
     'receipt.create',
     'receipt.post',
     'delivery.create',
-    'delivery.pick',
     'delivery.post',
     'transfer.create',
     'transfer.post',
     'adjustment.create',
-    'adjustment.approve',
     'count.create',
-    'count.approve',
     'ledger.export',
-    'reorder.manage',
     'settings.manage',
     'demo.reset',
   ],
+  'Floor Supervisor': [
+    ...VIEWER,
+    'delivery.pick',
+    'transfer.post',
+    'adjustment.approve',
+    'count.approve',
+    'ledger.export',
+  ],
   'Warehouse Staff': [
-    ...VIEWER_BASE,
-    'receipt.create',
+    ...VIEWER,
     'receipt.post',
     'delivery.pick',
-    'delivery.post',
     'transfer.create',
     'transfer.post',
     'adjustment.create',
     'count.create',
-    'ledger.export',
   ],
-  Viewer: [...VIEWER_BASE],
-};
-
-export const ROLE_SUMMARY: Record<Role, string> = {
-  Admin: 'Every screen, plus settings and diagnostics.',
-  'Inventory Manager': 'Full operational control over stock and documents.',
-  'Warehouse Staff': 'Floor tasks: receiving, picking, moving and counting.',
-  Viewer: 'Read-only dashboards and reports.',
 };
 
 export function permissionsFor(role: Role): Permission[] {
@@ -102,25 +98,27 @@ export function can(user: User | null | undefined, permission: Permission): bool
   return !!user && permissionsFor(user.role).includes(permission);
 }
 
-/* ------------------------------------------------------------- sessions */
+/* ------------------------------------------------------------------ *
+ * Sessions — held in memory so tokens never touch disk.
+ * ------------------------------------------------------------------ */
 
 const sessions = new Map<string, AuthSession>();
 
 function sweep(): void {
-  const nowMs = Date.now();
+  const now = Date.now();
   for (const [token, s] of sessions) {
-    if (new Date(s.expiresAt).getTime() <= nowMs) sessions.delete(token);
+    if (new Date(s.expiresAt).getTime() <= now) sessions.delete(token);
   }
 }
 
 export function createSession(userId: string): AuthSession {
   sweep();
-  const nowMs = Date.now();
+  const now = Date.now();
   const session: AuthSession = {
     token: randomBytes(32).toString('hex'),
     userId,
-    issuedAt: new Date(nowMs).toISOString(),
-    expiresAt: new Date(nowMs + SESSION_TTL_MS).toISOString(),
+    issuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
   };
   sessions.set(session.token, session);
   return session;
@@ -128,6 +126,16 @@ export function createSession(userId: string): AuthSession {
 
 export function destroySession(token: string): void {
   sessions.delete(token);
+}
+
+export function destroyUserSessions(userId: string): void {
+  for (const [token, s] of sessions) {
+    if (s.userId === userId) sessions.delete(token);
+  }
+}
+
+export function clearSessions(): void {
+  sessions.clear();
 }
 
 export function activeSessionCount(): number {
@@ -148,7 +156,9 @@ function userForToken(token: string | undefined): User | null {
   return user;
 }
 
-/* ------------------------------------------------------------ login flow */
+/* ------------------------------------------------------------------ *
+ * Login / logout
+ * ------------------------------------------------------------------ */
 
 export interface LoginResult {
   token: string;
@@ -160,7 +170,7 @@ export function login(email: string, password: string): LoginResult {
   const db = getDb();
   const user = db.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
 
-  // Always verify, so a missing user and a wrong password cost the same.
+  // Always run a verification so a missing user and a wrong password cost the same.
   const cred = user ? db.credentials.find((c) => c.userId === user.id) : undefined;
   const salt = cred?.salt ?? 'stocksense-absent-user-padding';
   const expected = cred?.hash ?? hashPassword('irrelevant', salt).hash;
@@ -172,11 +182,14 @@ export function login(email: string, password: string): LoginResult {
   if (!user.active) {
     throw new HttpError(403, 'This account has been deactivated. Contact an administrator.');
   }
+
   const session = createSession(user.id);
   return { token: session.token, user, permissions: permissionsFor(user.role) };
 }
 
-/* ------------------------------------------------------------ middleware */
+/* ------------------------------------------------------------------ *
+ * Express middleware
+ * ------------------------------------------------------------------ */
 
 function tokenFrom(req: Request): string | undefined {
   const header = req.get('authorization');
@@ -185,6 +198,7 @@ function tokenFrom(req: Request): string | undefined {
   return alt?.trim() || undefined;
 }
 
+/** Attaches `req.user` when a valid token is present, but never rejects. */
 export function attachUser(req: Request, _res: Response, next: NextFunction): void {
   const user = userForToken(tokenFrom(req));
   if (user) req.user = user;
@@ -201,9 +215,9 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
   next();
 }
 
-/** Enforced inside every mutation handler, not only by hiding buttons. */
 export function requirePermission(permission: Permission) {
   return (req: Request, _res: Response, next: NextFunction): void => {
+    // Resolve independently of `attachUser` so this guard is safe to mount alone.
     const user = req.user ?? userForToken(tokenFrom(req));
     if (!user) {
       next(new HttpError(401, 'Please sign in to continue.'));
@@ -214,7 +228,7 @@ export function requirePermission(permission: Permission) {
       next(
         new HttpError(
           403,
-          `Your role (${user.role}) is not allowed to ${permission.replace('.', ' ')}. Ask an administrator if you need access.`,
+          `Your role (${user.role}) does not have permission to ${permission.replace('.', ' ')}.`,
         ),
       );
       return;

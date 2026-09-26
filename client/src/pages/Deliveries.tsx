@@ -14,15 +14,20 @@ import {
   Segmented,
   StatusBadge,
 } from '../components/ui';
-import type { Delivery, DocStatus } from '../types';
+import type { Delivery, DocColumn } from '../types';
+import { docMatchesColumn } from '../types';
 
-const COLUMNS: { key: DocStatus; label: string; icon: string }[] = [
+const COLUMNS: DocColumn[] = [
   { key: 'Draft', label: 'Draft', icon: 'edit_note' },
   { key: 'Waiting', label: 'Waiting', icon: 'hourglass_top' },
   { key: 'Ready', label: 'Ready', icon: 'inventory' },
-  { key: 'Overdue', label: 'Overdue', icon: 'warning' },
+  { key: 'Picking', label: 'Picking', icon: 'shopping_cart' },
+  { key: 'Packed', label: 'Packed', icon: 'package_2' },
   { key: 'Done', label: 'Completed', icon: 'task_alt' },
 ];
+
+/** Board columns are the flow; the Overdue lane is a derived attention filter. */
+const CHIPS = ['All', ...COLUMNS.map((c) => c.key), 'Overdue'];
 
 export default function Deliveries() {
   const { snap } = useApp();
@@ -54,14 +59,14 @@ export default function Deliveries() {
       <div className="card mb-4 flex flex-wrap items-end gap-3 p-3">
         <Field label="Status" className="min-w-44">
           <select value={status} onChange={(e) => setStatus(e.target.value)} className="field">
-            {['All', ...COLUMNS.map((c) => c.key)].map((s) => (
+            {CHIPS.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
         </Field>
         <div className="flex flex-wrap gap-4 border-l border-outline-variant pl-4 text-[11.5px]">
           {COLUMNS.map((c) => {
-            const n = snap.deliveries.filter((d) => d.status === c.key).length;
+            const n = snap.deliveries.filter((d) => docMatchesColumn(d, c.key)).length;
             return (
               <span key={c.key} className="text-on-surface/55">
                 <b className="tnum block text-[15px] text-on-surface">{n}</b>
@@ -132,7 +137,7 @@ export default function Deliveries() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {COLUMNS.map((col) => {
-            const items = rows.filter((d) => d.status === col.key);
+            const items = rows.filter((d) => docMatchesColumn(d, col.key));
             return (
               <div key={col.key} className="flex min-h-40 flex-col rounded-xl border border-outline-variant bg-surface-low p-2">
                 <div className="mb-2 flex items-center gap-1.5 px-1">

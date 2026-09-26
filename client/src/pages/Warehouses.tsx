@@ -75,7 +75,7 @@ export default function Warehouses() {
       <PageHeader
         eyebrow="Network topology"
         title="Warehouses & Locations"
-        subtitle="Container locations roll up the balances of their child bins, so WH/Stock1 always reflects everything sitting on its racks."
+        subtitle="Container locations roll up the balances of their child bins, so WH/Stock always reflects everything sitting on its racks."
         actions={
           <div className="relative">
             <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-outline">

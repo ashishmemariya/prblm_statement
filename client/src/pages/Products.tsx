@@ -598,7 +598,7 @@ export function ProductDetail() {
     );
   }
 
-  const activeLoc = loc || ((p.byLocation ?? []).find((l) => l.qty > 0)?.code ?? snap.locations.find((l) => !l.container)?.code ?? 'WH/Stock1');
+  const activeLoc = loc || ((p.byLocation ?? []).find((l) => l.qty > 0)?.code ?? snap.locations.find((l) => !l.container)?.code ?? 'WH/Stock/Bay-04');
   const bookQty = bookQtyIn(p, activeLoc, snap);
   const delta = counted === '' ? 0 : Number(counted) - bookQty;
   const dualSignoff = Math.abs(delta) * p.unitCost >= snap.settings.dualSignoffThreshold;

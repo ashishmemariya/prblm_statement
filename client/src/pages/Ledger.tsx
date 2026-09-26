@@ -14,11 +14,13 @@ import {
 } from '../components/ui';
 import type { LedgerType } from '../types';
 
-const TYPE_TONE: Record<LedgerType, 'success' | 'error' | 'warn' | 'teal'> = {
+const TYPE_TONE: Record<LedgerType, 'success' | 'error' | 'warn' | 'teal' | 'neutral'> = {
   RECEIPT: 'success',
   DELIVERY: 'error',
   ADJUSTMENT: 'warn',
   TRANSFER: 'teal',
+  OPENING: 'neutral',
+  REVERSAL: 'neutral',
 };
 
 const TYPE_ICON: Record<LedgerType, string> = {
@@ -26,6 +28,8 @@ const TYPE_ICON: Record<LedgerType, string> = {
   DELIVERY: 'north_east',
   ADJUSTMENT: 'rule',
   TRANSFER: 'compare_arrows',
+  OPENING: 'flag',
+  REVERSAL: 'undo',
 };
 
 export default function Ledger() {
