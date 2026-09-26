@@ -119,6 +119,15 @@ export type AdjustmentReason =
   | 'Supplier Surplus'
   | 'Other';
 
+export const ADJUSTMENT_REASONS = [
+  'Damaged in Transit',
+  'Missing / Investigation',
+  'Incorrect Entry / Counting Error',
+  'Scrap / Wear & Tear',
+  'Supplier Surplus',
+  'Other',
+] as const satisfies readonly AdjustmentReason[];
+
 export type AdjustmentState = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Canceled';
 
 export interface Adjustment {

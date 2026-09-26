@@ -506,6 +506,14 @@ export interface AttentionItem {
   cta: string;
 }
 
+export function docMatchesColumn(
+  doc: { status?: string; state?: string; attention?: AttentionItem | null },
+  key: string,
+): boolean {
+  if (key === 'Overdue') return doc.attention?.kind === 'Overdue';
+  return (doc.status ?? doc.state) === key;
+}
+
 export interface DashboardSummary {
   currency: string;
   totalStock: number;

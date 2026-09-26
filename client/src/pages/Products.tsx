@@ -1,92 +1,116 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { api } from '../api';
-import { useApp } from '../store';
-import { Drawer, Modal } from '../components/overlays';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useApp, useSnap } from '../store';
+import { adjustmentService } from '../services';
+import { money, qty as n, shortDate, signed, stamp } from '../lib/format';
+import { downloadCsv, stampForFile, toCsv } from '../lib/csv';
+import { useTable } from '../lib/hooks';
+import type { AdjustmentReason, Product } from '../types';
 import {
   Badge,
+  Button,
   Card,
   Delta,
-  Empty,
+  EmptyState,
+  ErrorState,
   Field,
+  FlowChart,
   Icon,
+  IconButton,
+  KeyValue,
+  LinkButton,
+  Meter,
+  Modal,
   PageHeader,
-  Ref,
+  Pagination,
+  QuantityInput,
+  SearchInput,
+  SectionCard,
   Segmented,
-  SectionTitle,
+  Select,
+  StatRow,
   StatusBadge,
-} from '../components/ui';
-import type { Product, Snapshot } from '../types';
+  Table,
+  Td,
+  Textarea,
+  Th,
+  Timeline,
+  Toolbar,
+  WarnNote,
+} from '../components/design';
+import { LEDGER_ICON, LEDGER_LABEL } from '../lib/format';
 
-const STATUS_RING: Record<string, string> = {
-  IN_STOCK: 'ring-success/25',
-  LOW: 'ring-warning/30',
-  OUT: 'ring-error/30',
-};
+/* ============================================================ products list */
 
-const stockTone = (p: Product): string => {
-  if (p.total === 0) return 'text-error';
-  if (p.status === 'LOW') return 'text-warning';
-  return 'text-on-surface';
-};
-
-/** Book quantity held in a location subtree, mirroring the server's roll-up. */
-function bookQtyIn(p: Product, code: string, snap: Snapshot): number {
-  if (!code) return p.total;
-  if (!snap.locations.some((l) => l.code === code)) return p.total;
-  const scope = new Set<string>([code]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const l of snap.locations) {
-      if (l.parent && scope.has(l.parent) && !scope.has(l.code)) {
-        scope.add(l.code);
-        grew = true;
-      }
-    }
-  }
-  return [...scope].reduce((a, k) => a + (p.stock[k] ?? 0), 0);
-}
-
-/* ------------------------------------------------------------------ *
- * List page
- * ------------------------------------------------------------------ */
+type View = 'table' | 'cards' | 'locations';
 
 export default function Products() {
-  const { snap, busy } = useApp();
-  const [q, setQ] = useState('');
-  const [cat, setCat] = useState('All');
-  const [status, setStatus] = useState('All');
-  const [view, setView] = useState<'grid' | 'ledger'>('grid');
+  const { snap, can, notify } = useApp();
+  const [view, setView] = useState<View>('table');
   const [adjust, setAdjust] = useState<Product | null>(null);
-  const [history, setHistory] = useState<Product | null>(null);
 
-  const categories = useMemo(
-    () => ['All', ...new Set((snap?.products ?? []).map((p) => p.category))],
-    [snap],
-  );
+  const categories = useMemo(() => ['All', ...new Set(snap.products.map((p) => p.category))].sort(), [snap.products]);
 
-  const rows = useMemo(() => {
-    let list = snap?.products ?? [];
-    if (q) {
-      const s = q.toLowerCase();
-      list = list.filter(
-        (p) => p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s),
-      );
-    }
-    if (cat !== 'All') list = list.filter((p) => p.category === cat);
-    if (status !== 'All') list = list.filter((p) => p.status === status);
-    return list;
-  }, [snap, q, cat, status]);
+  const table = useTable(snap.products, {
+    search: (p, term) =>
+      p.name.toLowerCase().includes(term) ||
+      p.sku.toLowerCase().includes(term) ||
+      p.barcode.toLowerCase().includes(term) ||
+      p.category.toLowerCase().includes(term),
+    filters: {
+      category: (p) => p.category === table.filters.category,
+      health: (p) => p.health === table.filters.health,
+      warehouse: (p) =>
+        table.filters.warehouse === 'All' ||
+        table.filters.warehouse === '' ||
+        p.locations.some((l) => l.warehouse === table.filters.warehouse),
+    },
+    sorters: {
+      name: (a, b) => a.name.localeCompare(b.name),
+      onHand: (a, b) => a.onHand - b.onHand,
+      value: (a, b) => a.value - b.value,
+      available: (a, b) => a.available - b.available,
+    },
+    pageSize: 12,
+  });
 
-  const totals = useMemo(
-    () => ({
-      units: rows.reduce((a, p) => a + p.total, 0),
-      value: rows.reduce((a, p) => a + p.total * p.unitCost, 0),
-      reserved: rows.reduce((a, p) => a + p.reserved, 0),
-      flagged: rows.filter((p) => p.status !== 'IN_STOCK').length,
+  const exportCsv = () => {
+    const columns = [
+      { key: 'sku', label: 'SKU' },
+      { key: 'name', label: 'Product' },
+      { key: 'category', label: 'Category' },
+      { key: 'uom', label: 'Unit' },
+      { key: 'onHand', label: 'On hand' },
+      { key: 'reserved', label: 'Reserved' },
+      { key: 'available', label: 'Available' },
+      { key: 'reorderPoint', label: 'Reorder level' },
+      { key: 'health', label: 'Health' },
+      { key: 'value', label: `Value (${snap.settings.company.currency})` },
+    ];
+    const rows = table.allRows.map((p) => ({
+      sku: p.sku,
+      name: p.name,
+      category: p.category,
+      uom: p.uom,
+      onHand: p.onHand,
+      reserved: p.reserved,
+      available: p.available,
+      reorderPoint: p.reorder.reorderPoint,
+      health: p.health,
+      value: p.value,
+    }));
+    downloadCsv(`stocksense-products-${stampForFile()}`, toCsv(columns, rows));
+    notify({ tone: 'success', title: 'Products exported', detail: `${rows.length} rows written to CSV.` });
+  };
+
+  const totals = table.allRows.reduce(
+    (acc, p) => ({
+      units: acc.units + p.onHand,
+      value: acc.value + p.value,
+      reserved: acc.reserved + p.reserved,
+      flagged: acc.flagged + (p.health === 'IN_STOCK' ? 0 : 1),
     }),
-    [rows],
+    { units: 0, value: 0, reserved: 0, flagged: 0 },
   );
 
   return (
@@ -94,747 +118,838 @@ export default function Products() {
       <PageHeader
         eyebrow="Inventory master"
         title="Products & Stock"
-        subtitle="Per-SKU cockpit with warehouse breakdown, soft reservations and reorder thresholds. Adjustments post straight to the immutable ledger."
+        breadcrumb={[{ label: 'Overview' }, { label: 'Products & Stock' }]}
+        description="On hand, reserved, available and value for every product, with the locations that hold it."
         actions={
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'grid', label: 'Cockpit', icon: 'grid_view' },
-              { value: 'ledger', label: 'Stock ledger', icon: 'table_rows' },
-            ]}
-          />
+          <>
+            <Segmented
+              value={view}
+              onChange={setView}
+              ariaLabel="Choose a view"
+              options={[
+                { value: 'table', label: 'Table', icon: 'table_rows' },
+                { value: 'cards', label: 'Cards', icon: 'grid_view' },
+                { value: 'locations', label: 'By location', icon: 'shelves' },
+              ]}
+            />
+            {can('ledger.export') && (
+              <Button icon="download" onClick={exportCsv}>
+                Export CSV
+              </Button>
+            )}
+          </>
         }
       />
 
-      <div className="card mb-4 flex flex-wrap items-end gap-3 p-3">
+      <Toolbar>
         <Field label="Search" className="min-w-52 flex-1">
-          <div className="relative">
-            <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-outline">
-              <Icon name="search" size={16} />
-            </span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Name or SKU…"
-              className="field !pl-8"
-            />
-          </div>
+          <SearchInput
+            value={table.term}
+            onChange={table.setTerm}
+            placeholder="Name, SKU, barcode or category…"
+          />
         </Field>
-        <Field label="Category" className="min-w-44">
-          <select value={cat} onChange={(e) => setCat(e.target.value)} className="field">
+        <Field label="Category" className="min-w-40">
+          <Select value={table.filters.category ?? 'All'} onChange={(e) => table.setFilter('category', e.target.value)}>
             {categories.map((c) => (
               <option key={c}>{c}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Health" className="min-w-36">
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="field">
-            {['All', 'IN_STOCK', 'LOW', 'OUT'].map((s) => (
-              <option key={s} value={s}>
-                {s === 'All' ? 'All health states' : s === 'IN_STOCK' ? 'In stock' : s === 'LOW' ? 'Low stock' : 'Out of stock'}
+          <Select value={table.filters.health ?? 'All'} onChange={(e) => table.setFilter('health', e.target.value)}>
+            <option value="All">All health states</option>
+            <option value="IN_STOCK">In stock</option>
+            <option value="LOW">Low stock</option>
+            <option value="OUT">Out of stock</option>
+          </Select>
+        </Field>
+        <Field label="Warehouse" className="min-w-40">
+          <Select value={table.filters.warehouse ?? 'All'} onChange={(e) => table.setFilter('warehouse', e.target.value)}>
+            <option value="All">All warehouses</option>
+            {snap.warehouses.map((w) => (
+              <option key={w.code} value={w.code}>
+                {w.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
-        <div className="flex flex-wrap gap-4 border-l border-outline-variant pl-4 text-[11.5px]">
-          <span className="text-on-surface/55">
-            <b className="tnum block text-[15px] text-on-surface">{rows.length}</b> SKUs
-          </span>
-          <span className="text-on-surface/55">
-            <b className="tnum block text-[15px] text-on-surface">{totals.units.toLocaleString('en-IN')}</b> units
-          </span>
-          <span className="text-on-surface/55">
-            <b className="tnum block text-[15px] text-on-surface">
-              {snap?.settings.currency}
-              {(totals.value / 1e5).toFixed(1)}L
-            </b>{' '}
-            value
-          </span>
-          <span className="text-on-surface/55">
-            <b className="tnum block text-[15px] text-warning">{totals.reserved}</b> reserved
-          </span>
-          <span className="text-on-surface/55">
-            <b className="tnum block text-[15px] text-error">{totals.flagged}</b> flagged
-          </span>
+        <div className="ml-auto flex flex-wrap items-end gap-4">
+          <Counter label="Products" value={table.allRows.length} />
+          <Counter label="Units on hand" value={n(totals.units)} />
+          <Counter label="Value" value={money(totals.value, snap.settings.company.currency, true)} />
+          <Counter label="Flagged" value={totals.flagged} tone={totals.flagged > 0 ? 'warning' : undefined} />
+          {(table.activeFilters.length > 0 || table.term) && (
+            <Button size="sm" variant="ghost" icon="filter_alt_off" onClick={table.clearFilters}>
+              Clear all
+            </Button>
+          )}
         </div>
-      </div>
+      </Toolbar>
 
-      {rows.length === 0 ? (
+      {table.allRows.length === 0 ? (
         <Card>
-          <Empty icon="inventory_2" title="No products match these filters" detail="Try clearing the search box or resetting the health filter." />
+          <EmptyState
+            icon="inventory_2"
+            title="No products match these filters"
+            detail="Try a different search term, or clear the filters to see the whole catalogue."
+            action={
+              <Button icon="filter_alt_off" onClick={table.clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
         </Card>
-      ) : view === 'grid' ? (
+      ) : view === 'table' ? (
+        <Card className="overflow-hidden">
+          <Table>
+            <thead className="border-b border-border">
+              <tr>
+                <Th>Product</Th>
+                <Th>SKU</Th>
+                <Th>Category</Th>
+                <Th>UOM</Th>
+                <Th align="right" sortable sorted={table.sort?.key === 'onHand' ? table.sort.dir : null} onSort={() => table.toggleSort('onHand')}>
+                  On hand
+                </Th>
+                <Th align="right">Reserved</Th>
+                <Th align="right" sortable sorted={table.sort?.key === 'available' ? table.sort.dir : null} onSort={() => table.toggleSort('available')}>
+                  Available
+                </Th>
+                <Th align="right">Reorder level</Th>
+                <Th>Health</Th>
+                <Th>Locations</Th>
+                <Th align="right" sortable sorted={table.sort?.key === 'value' ? table.sort.dir : null} onSort={() => table.toggleSort('value')}>
+                  Value
+                </Th>
+                <Th>Last updated</Th>
+                <Th>Actions</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {table.rows.map((p) => (
+                <tr key={p.sku} className="row">
+                  <Td>
+                    <Link to={`/products/${p.sku}`} className="flex items-center gap-2 hover:text-primary">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary-soft text-primary">
+                        <Icon name={p.icon} size={15} fill />
+                      </span>
+                      <span className="min-w-0 truncate font-semibold">{p.name}</span>
+                    </Link>
+                  </Td>
+                  <Td>
+                    <span className="ref text-[11.5px]">{p.sku}</span>
+                  </Td>
+                  <Td className="text-[11.5px] text-text-muted">{p.category}</Td>
+                  <Td className="text-[11.5px] font-semibold">{p.uom}</Td>
+                  <Td align="right">
+                    <span className={`tnum font-mono font-bold ${p.onHand === 0 ? 'text-danger' : p.health === 'LOW' ? 'text-warning' : ''}`}>
+                      {n(p.onHand).toLocaleString('en-IN')}
+                    </span>
+                  </Td>
+                  <Td align="right" className="tnum font-mono text-[11.5px] text-warning">
+                    {p.reserved > 0 ? n(p.reserved) : '—'}
+                  </Td>
+                  <Td align="right" className="tnum font-mono text-[12px] font-semibold">
+                    {n(p.available).toLocaleString('en-IN')}
+                  </Td>
+                  <Td align="right" className="tnum font-mono text-[11.5px] text-text-muted">
+                    {n(p.reorder.reorderPoint)}
+                  </Td>
+                  <Td>
+                    <StatusBadge value={p.health} />
+                  </Td>
+                  <Td className="tnum font-mono text-[11.5px]">{p.locations.length}</Td>
+                  <Td align="right" className="tnum font-mono text-[11.5px] font-semibold">
+                    {money(p.value, snap.settings.company.currency)}
+                  </Td>
+                  <Td className="whitespace-nowrap text-[11.5px] text-text-muted">{shortDate(p.updatedAt)}</Td>
+                  <Td>
+                    <div className="flex items-center gap-1">
+                      <IconButton label={`View ${p.name}`} icon="visibility" size="sm" onClick={() => window.location.assign(`#/products/${p.sku}`)} />
+                      <Link to={`/receipts/new?sku=${p.sku}`} className="btn btn-ghost btn-sm btn-icon" title="Receive" aria-label={`Receive ${p.name}`}>
+                        <Icon name="south_west" size={15} />
+                      </Link>
+                      <Link to={`/transfers/new?sku=${p.sku}`} className="btn btn-ghost btn-sm btn-icon" title="Transfer" aria-label={`Transfer ${p.name}`}>
+                        <Icon name="swap_horiz" size={15} />
+                      </Link>
+                      {can('adjustment.create') && (
+                        <IconButton label="Adjust" icon="rule" size="sm" onClick={() => setAdjust(p)} />
+                      )}
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <Pagination page={table.page} pageCount={table.pageCount} onPage={table.setPage} total={table.total} unit="products" />
+        </Card>
+      ) : view === 'cards' ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((p) => (
-            <article
-              key={p.sku}
-              className={`card animate-in group flex flex-col p-4 ring-1 transition hover:border-primary/40 hover:shadow-md ${STATUS_RING[p.status] ?? ''}`}
-            >
+          {table.rows.map((p) => (
+            <article key={p.sku} className="card animate-in flex flex-col p-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-container/12 text-primary">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
                   <Icon name={p.icon} size={21} fill />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <Link
-                    to={`/products/${p.sku}`}
-                    className="block truncate text-[13px] leading-tight font-bold hover:text-primary hover:underline"
-                  >
+                  <Link to={`/products/${p.sku}`} className="block truncate text-[13px] leading-tight font-bold hover:text-primary">
                     {p.name}
                   </Link>
-                  <p className="ref mt-0.5 truncate text-[10.5px] text-on-surface/50">{p.sku}</p>
+                  <p className="ref mt-0.5 truncate text-[10.5px] text-text-muted">{p.sku}</p>
                 </div>
-                <StatusBadge value={p.status} dot />
+                <StatusBadge value={p.health} />
               </div>
 
               <div className="mt-3 flex items-end gap-1.5">
-                <span className={`tnum text-[28px] leading-none font-extrabold ${stockTone(p)}`}>
-                  {p.total}
+                <span className={`tnum text-[26px] leading-none font-extrabold ${p.onHand === 0 ? 'text-danger' : p.health === 'LOW' ? 'text-warning' : ''}`}>
+                  {n(p.onHand).toLocaleString('en-IN')}
                 </span>
-                <span className="mb-0.5 text-[12px] text-on-surface/55">{p.unit}</span>
-                <span className="mb-0.5 ml-auto font-mono text-[11px] text-on-surface/45">
-                  {snap?.settings.currency}
-                  {p.unitCost.toLocaleString('en-IN')}
+                <span className="mb-0.5 text-[12px] text-text-muted">{p.uom}</span>
+                <span className="mb-0.5 ml-auto font-mono text-[11px] text-text-subtle">
+                  {money(p.value, snap.settings.company.currency, true)}
                 </span>
               </div>
 
-              <div className="mt-3 space-y-1">
-                {(p.byLocation ?? [])
-                  .filter((l) => l.qty > 0)
-                  .slice(0, 3)
-                  .map((l) => {
-                    const pct = p.total > 0 ? (l.qty / p.total) * 100 : 0;
-                    return (
-                      <div key={l.code} className="flex items-center gap-2">
-                        <span className="ref w-32 shrink-0 truncate text-[10px] text-on-surface/55">
-                          {l.code}
-                        </span>
-                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-container">
-                          <div className="h-full rounded-full bg-tertiary" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="tnum w-8 shrink-0 text-right font-mono text-[10px] font-semibold">
-                          {l.qty}
-                        </span>
-                      </div>
-                    );
-                  })}
-                {p.total === 0 && (
-                  <p className="flex items-center gap-1.5 rounded-md bg-error-container px-2 py-1 text-[10.5px] font-semibold text-on-error-container">
+              <div className="mt-3 space-y-1.5">
+                {p.locations.slice(0, 3).map((l) => (
+                  <div key={l.code} className="flex items-center gap-2">
+                    <span className="w-28 shrink-0 truncate text-[10.5px] text-text-muted" title={l.name}>
+                      {l.name}
+                    </span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${p.onHand > 0 ? (l.qty / p.onHand) * 100 : 0}%` }} />
+                    </div>
+                    <span className="tnum w-12 shrink-0 text-right font-mono text-[10.5px] font-semibold">{n(l.qty)}</span>
+                  </div>
+                ))}
+                {p.locations.length === 0 && (
+                  <p className="flex items-center gap-1.5 rounded-md bg-danger-soft px-2 py-1 text-[10.5px] font-semibold text-danger-ink">
                     <Icon name="error" size={13} /> No stock in any location
                   </p>
                 )}
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-outline-variant pt-2.5 text-[10.5px]">
-                <Badge tone="neutral">RO {p.reorderPoint}</Badge>
-                {p.reserved > 0 && <Badge tone="warn">Reserved {p.reserved}</Badge>}
-                <Badge tone="teal">Free {p.free}</Badge>
-                <div className="ml-auto flex gap-1">
-                  <button
-                    onClick={() => setHistory(p)}
-                    className="btn btn-outline !px-2 !py-1 !text-[10.5px]"
-                    title="Movement history"
-                  >
-                    <Icon name="history" size={13} />
-                  </button>
-                  <button
-                    onClick={() => setAdjust(p)}
-                    className="btn btn-outline !px-2 !py-1 !text-[10.5px]"
-                    title="Quick adjust"
-                  >
-                    <Icon name="edit_note" size={14} />
-                  </button>
-                </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5 text-[10.5px]">
+                <Badge tone="neutral">Reorder at {n(p.reorder.reorderPoint)}</Badge>
+                {p.reserved > 0 && <Badge tone="warning">Reserved {n(p.reserved)}</Badge>}
+                {p.incoming > 0 && <Badge tone="info">Incoming {n(p.incoming)}</Badge>}
+                <span className="ml-auto flex gap-1">
+                  <Link to={`/products/${p.sku}`} className="btn btn-ghost btn-sm" aria-label={`Open ${p.name}`}>
+                    View
+                  </Link>
+                  {can('adjustment.create') && (
+                    <Button size="sm" variant="ghost" onClick={() => setAdjust(p)}>
+                      Adjust
+                    </Button>
+                  )}
+                </span>
               </div>
             </article>
           ))}
         </div>
       ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
-              <thead className="border-b border-outline-variant bg-surface-low">
-                <tr>
-                  <th className="th">SKU</th>
-                  <th className="th">Product</th>
-                  <th className="th">Category</th>
-                  <th className="th text-right">On hand</th>
-                  <th className="th text-right">Reserved</th>
-                  <th className="th text-right">Free</th>
-                  <th className="th text-right">RO</th>
-                  <th className="th text-right">Unit cost</th>
-                  <th className="th text-right">Value</th>
-                  <th className="th">Health</th>
-                  <th className="th" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant">
-                {rows.map((p) => (
-                  <tr key={p.sku} className="row">
-                    <td className="td">
-                      <Ref className="text-[11.5px]">{p.sku}</Ref>
-                    </td>
-                    <td className="td max-w-64">
-                      <Link to={`/products/${p.sku}`} className="flex items-center gap-2 hover:text-primary">
-                        <Icon name={p.icon} size={16} className="shrink-0 text-primary" />
-                        <span className="truncate font-semibold">{p.name}</span>
-                      </Link>
-                    </td>
-                    <td className="td text-[11.5px] text-on-surface/60">{p.category}</td>
-                    <td className={`td tnum text-right font-mono font-bold ${stockTone(p)}`}>{p.total}</td>
-                    <td className="td tnum text-right font-mono text-[11.5px] text-warning">
-                      {p.reserved || '—'}
-                    </td>
-                    <td className="td tnum text-right font-mono text-[11.5px]">{p.free}</td>
-                    <td className="td tnum text-right font-mono text-[11.5px] text-on-surface/50">{p.reorderPoint}</td>
-                    <td className="td tnum text-right font-mono text-[11.5px]">
-                      {snap?.settings.currency}
-                      {p.unitCost.toLocaleString('en-IN')}
-                    </td>
-                    <td className="td tnum text-right font-mono text-[11.5px] font-semibold">
-                      {snap?.settings.currency}
-                      {(p.total * p.unitCost).toLocaleString('en-IN')}
-                    </td>
-                    <td className="td">
-                      <StatusBadge value={p.status} dot />
-                    </td>
-                    <td className="td text-right">
-                      <button onClick={() => setAdjust(p)} className="btn btn-outline !px-2 !py-1">
-                        <Icon name="edit_note" size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <StockByLocation products={table.allRows} warehouses={snap.warehouses} currency={snap.settings.company.currency} />
       )}
 
-      <QuickAdjustDrawer
-        product={adjust}
-        onClose={() => setAdjust(null)}
-        busy={busy}
-      />
+      {table.allRows.length > 12 && (
+        <div className="mt-3">
+          <Pagination page={table.page} pageCount={table.pageCount} onPage={table.setPage} total={table.total} unit="products" />
+        </div>
+      )}
 
-      <HistoryModal product={history} onClose={() => setHistory(null)} />
+      <QuickAdjustDialog product={adjust} onClose={() => setAdjust(null)} />
     </>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Quick adjust drawer — creates a Pending Approval count, manager posts it
- * ------------------------------------------------------------------ */
+function Counter({ label, value, tone }: { label: string; value: number | string; tone?: 'warning' }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold tracking-[0.05em] text-text-muted uppercase">{label}</p>
+      <p className={`tnum font-mono text-[15px] font-extrabold ${tone === 'warning' ? 'text-warning' : ''}`}>{value}</p>
+    </div>
+  );
+}
 
-function QuickAdjustDrawer({
-  product,
-  onClose,
-  busy,
+/** Product × location matrix, built from the same numbers the server reports. */
+function StockByLocation({
+  products,
+  warehouses,
+  currency,
 }: {
-  product: Product | null;
-  onClose: () => void;
-  busy: boolean;
+  products: Product[];
+  warehouses: { code: string; name: string }[];
+  currency: string;
 }) {
-  const { snap, run } = useApp();
-  const [loc, setLoc] = useState('');
-  const [counted, setCounted] = useState('');
-  const [reason, setReason] = useState('Scrap / Wear & Tear');
-  const [memo, setMemo] = useState('');
+  const [warehouse, setWarehouse] = useState('All');
+  const locations = useMemo(() => {
+    const map = new Map<string, { code: string; name: string; warehouse: string }>();
+    for (const p of products) {
+      for (const l of p.locations) {
+        if (!map.has(l.code)) {
+          const loc = snapLocationName(l.code);
+          map.set(l.code, { code: l.code, name: loc, warehouse: l.warehouse });
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }, [products]);
 
-  const locations = snap?.locations.filter((l) => !l.container) ?? [];
-  const p = product;
-  const bookQty = p && snap ? bookQtyIn(p, loc, snap) : 0;
+  function snapLocationName(code: string): string {
+    return code.split('/').pop()?.replace(/-/g, ' ') ?? code;
+  }
 
-  const delta = counted === '' ? 0 : Number(counted) - bookQty;
-  const impact = delta * (p?.unitCost ?? 0);
-  const dualSignoff = Math.abs(impact) >= (snap?.settings.dualSignoffThreshold ?? 0);
+  const rows = locations
+    .filter((l) => warehouse === 'All' || l.warehouse === warehouse)
+    .map((location) => {
+      const held = products
+        .map((p) => ({ p, qty: p.locations.find((l) => l.code === location.code)?.qty ?? 0 }))
+        .filter((row) => row.qty > 0)
+        .sort((a, b) => b.qty - a.qty);
+      return {
+        ...location,
+        held,
+        total: held.reduce((a, row) => a + row.qty, 0),
+        value: held.reduce((a, row) => a + row.qty * row.p.unitCost, 0),
+      };
+    });
+
+  return (
+    <>
+      <Toolbar>
+        <Field label="Warehouse" className="min-w-48">
+          <Select value={warehouse} onChange={(e) => setWarehouse(e.target.value)}>
+            <option value="All">All warehouses</option>
+            {warehouses.map((w) => (
+              <option key={w.code} value={w.code}>
+                {w.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <p className="ml-auto text-[11.5px] text-text-muted">
+          {rows.length} location(s) holding {products.length} product(s)
+        </p>
+      </Toolbar>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <Card key={row.code} className="overflow-hidden">
+            <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <Link to={`/locations/${row.code}`} className="block truncate text-[13px] font-bold hover:text-primary">
+                  {row.name}
+                </Link>
+                <p className="ref mt-0.5 truncate text-[10.5px] text-text-muted">{row.code}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="tnum font-mono text-[15px] font-extrabold">{n(row.total).toLocaleString('en-IN')}</p>
+                <p className="text-[10px] text-text-subtle">{money(row.value, currency, true)}</p>
+              </div>
+            </div>
+            <ul className="divide-y divide-border">
+              {row.held.map((h) => (
+                <li key={h.p.sku}>
+                  <Link to={`/products/${h.p.sku}`} className="flex items-center gap-2.5 px-4 py-2 hover:bg-surface-muted">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">{h.p.name}</span>
+                    <span className="tnum shrink-0 font-mono text-[12px] font-bold">
+                      {n(h.qty)} <span className="text-[10px] font-medium text-text-subtle">{h.p.uom}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ========================================================= quick adjust */
+
+const REASONS: AdjustmentReason[] = ['Damaged', 'Missing', 'Expired', 'Counting Error', 'Incorrect Entry', 'Other'];
+
+export function QuickAdjustDialog({ product, onClose }: { product: Product | null; onClose: () => void }) {
+  const { snap, run, busy } = useApp();
+  const [location, setLocation] = useState('');
+  const [counted, setCounted] = useState<number | null>(null);
+  const [reason, setReason] = useState<AdjustmentReason>('Counting Error');
+  const [notes, setNotes] = useState('');
+
+  const leafLocations = snap.locations.filter((l) => !l.container);
+  const active = location || leafLocations[0]?.code || '';
+  const bookQty = product
+    ? product.locations.find((l) => l.code === active)?.qty ?? 0
+    : 0;
+  const difference = counted === null ? null : n(counted - bookQty);
+  const impact = (difference ?? 0) * (product?.unitCost ?? 0);
+  const requiresApproval =
+    Math.abs(impact) >= snap.settings.approvalValueThreshold ||
+    (bookQty > 0 ? (Math.abs(difference ?? 0) / bookQty) * 100 : 0) >= snap.settings.approvalVariancePct;
 
   const submit = async () => {
-    if (!p || !loc || counted === '') return;
+    if (!product || counted === null) return;
     const res = await run(
-      `Count for ${p.sku}`,
-      async () => {
-        const created = await api.createCount({
-          sku: p.sku,
-          location: loc,
-          recorded: bookQty,
-          counted: Number(counted),
-          reason,
-          memo});
-        return api.postAdjustment({
-          ref: created.ref,
-          counted: Number(counted),
-          reason: reason as never,
-          memo
-        });
+      `Adjustment for ${product.sku}`,
+      () => adjustmentService.create({ sku: product.sku, location: active, counted, reason, notes }),
+      {
+        success: `Adjustment raised for ${product.sku}`,
+        detail: requiresApproval
+          ? 'It now needs approval before stock changes.'
+          : 'Submit it for approval to post the variance.',
+        action: { label: 'Open adjustment', to: '/adjustments' },
       },
-      { success: `Count posted for ${p.sku}` },
     );
-    if (res) {
-      setCounted('');
-      setMemo('');
+    if (res.ok) {
+      setCounted(null);
+      setNotes('');
       onClose();
     }
   };
 
   return (
-    <Drawer
-      open={!!p}
+    <Modal
+      open={!!product}
       onClose={onClose}
-      title="Post physical count"
-      subtitle={p ? `${p.name} · ${p.sku}` : ''}
+      title="Raise a count variance"
+      subtitle={product ? `${product.name} · ${product.sku}` : ''}
       footer={
         <>
-          <button className="btn btn-outline" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            disabled={busy || !loc || counted === '' || !p}
-            onClick={() => void submit()}
-          >
-            <Icon name="publish" size={16} /> Post to ledger
-          </button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon="add" loading={busy} disabled={!product || counted === null} onClick={() => void submit()}>
+            Raise adjustment
+          </Button>
         </>
       }
     >
-      {p && (
+      {product && (
         <div className="space-y-4">
-          <div className="card bg-surface-low p-3">
-            <div className="flex items-center justify-between text-[12px]">
-              <span className="text-on-surface/60">Current on hand (all locations)</span>
-              <span className="tnum font-mono font-bold">
-                {p.total} {p.unit}
-              </span>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-[12px]">
-              <span className="text-on-surface/60">Value at unit cost</span>
-              <span className="tnum font-mono font-bold">
-                {snap?.settings.currency}
-                {(p.total * p.unitCost).toLocaleString('en-IN')}
-              </span>
-            </div>
-          </div>
+          <StatRow
+            columns={3}
+            items={[
+              { label: 'On hand (all)', value: `${n(product.onHand)} ${product.uom}` },
+              { label: 'Unit cost', value: money(product.unitCost, snap.settings.company.currency) },
+              { label: 'Value', value: money(product.value, snap.settings.company.currency, true) },
+            ]}
+          />
 
-          <Field label="Count location">
-            <select value={loc} onChange={(e) => setLoc(e.target.value)} className="field">
-              <option value="">Select a bin…</option>
-              {locations.map((l) => (
+          <Field label="Location" required htmlFor="adjust-location">
+            <Select id="adjust-location" value={active} onChange={(e) => setLocation(e.target.value)}>
+              {leafLocations.map((l) => (
                 <option key={l.code} value={l.code}>
-                  {l.code} — {l.name}
+                  {l.name} — {l.code}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Book quantity">
-              <input value={bookQty} readOnly className="field tnum font-mono opacity-70" />
+            <Field label={`Book quantity at ${active.split('/').pop()}`}>
+              <Input value={bookQty} readOnly className="tnum bg-surface-muted font-mono opacity-70" />
             </Field>
-            <Field label="Physical count">
-              <input
-                type="number"
-                min={0}
-                value={counted}
-                onChange={(e) => setCounted(e.target.value)}
-                placeholder="0"
-                className="field tnum font-mono"
-              />
+            <Field label="Physical count" required htmlFor="adjust-count">
+              <QuantityInput id="adjust-count" value={counted} onChange={setCounted} unit={product.uom} />
             </Field>
           </div>
 
           <div
-            className={`flex items-center justify-between rounded-lg border px-3 py-2.5 ${
-              delta === 0
-                ? 'border-outline-variant bg-surface-low'
-                : delta > 0
-                  ? 'border-success/30 bg-success-container'
-                  : 'border-error/30 bg-error-container'
+            className={`flex items-center justify-between rounded-card border px-3.5 py-2.5 ${
+              difference === null
+                ? 'border-border bg-surface-muted'
+                : difference === 0
+                  ? 'border-border bg-surface-muted'
+                  : difference > 0
+                    ? 'border-success-border bg-success-soft'
+                    : 'border-danger-border bg-danger-soft'
             }`}
           >
-            <span className="text-[12px] font-semibold">Variance</span>
-            <span className="flex items-baseline gap-2">
-              <Delta value={delta} className="!text-[15px]" />
-              <span className="tnum text-[11px] text-on-surface/60">
-                {snap?.settings.currency}
-                {impact.toLocaleString('en-IN')}
-              </span>
+            <span className="text-[12px] font-bold">Difference</span>
+            <span className="flex items-baseline gap-2.5">
+              {difference === null ? (
+                <span className="text-[12px] text-text-muted">Enter a count</span>
+              ) : (
+                <>
+                  <Delta value={difference} className="text-[15px]" />
+                  <span className="tnum font-mono text-[11.5px] text-text-muted">
+                    {money(impact, snap.settings.company.currency)}
+                  </span>
+                </>
+              )}
             </span>
           </div>
 
-          {dualSignoff && (
-            <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-container px-3 py-2 text-[11.5px] text-on-warning-container">
-              <Icon name="verified_user" size={16} className="mt-px shrink-0" />
-              Variance exceeds the {snap?.settings.currency}
-              {snap?.settings.dualSignoffThreshold.toLocaleString('en-IN')} dual sign-off threshold —
-              a second approver is required before the books close.
-            </p>
+          {requiresApproval && (
+            <WarnNote tone="warning">
+              This variance crosses the approval threshold. It will need a manager to approve it before stock changes.
+            </WarnNote>
           )}
 
-          <Field label="Reason">
-            <select value={reason} onChange={(e) => setReason(e.target.value)} className="field">
-              {[
-                'Damaged in Transit',
-                'Missing / Investigation',
-                'Incorrect Entry / Counting Error',
-                'Scrap / Wear & Tear',
-                'Supplier Surplus',
-                'Other',
-              ].map((r) => (
+          <Field label="Reason" required htmlFor="adjust-reason">
+            <Select id="adjust-reason" value={reason} onChange={(e) => setReason(e.target.value as AdjustmentReason)}>
+              {REASONS.map((r) => (
                 <option key={r}>{r}</option>
               ))}
-            </select>
+            </Select>
           </Field>
 
-          <Field label="Memo" hint="Recorded verbatim on the ledger row.">
-            <textarea
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
+          <Field label="Notes" htmlFor="adjust-notes" hint="Recorded verbatim on the ledger row.">
+            <Textarea
+              id="adjust-notes"
               rows={3}
-              className="field resize-none"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
               placeholder="How was the count verified?"
             />
           </Field>
-        </div>
-      )}
-    </Drawer>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Movement history modal
- * ------------------------------------------------------------------ */
-
-function HistoryModal({ product, onClose }: { product: Product | null; onClose: () => void }) {
-  const { snap } = useApp();
-  const p = product;
-  const moves = (snap?.ledger ?? []).filter((l) => l.sku === p?.sku).slice(0, 30);
-
-  return (
-    <Modal
-      open={!!p}
-      onClose={onClose}
-      title={`Movement history · ${p?.sku ?? ''}`}
-      width="max-w-3xl"
-      footer={
-        <>
-          <button className="btn btn-outline" onClick={onClose}>
-            Close
-          </button>
-          {p && (
-            <Link to={`/products/${p.sku}`} className="btn btn-primary" onClick={onClose}>
-              Open full profile
-            </Link>
-          )}
-        </>
-      }
-    >
-      {moves.length === 0 ? (
-        <Empty icon="history" title="No stock moves yet" detail="This SKU has never been received, delivered or adjusted." />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-outline-variant">
-          <table className="w-full">
-            <thead className="border-b border-outline-variant bg-surface-low">
-              <tr>
-                <th className="th">When</th>
-                <th className="th">Ref</th>
-                <th className="th">Type</th>
-                <th className="th">From → To</th>
-                <th className="th text-right">Δ</th>
-                <th className="th text-right">Balance</th>
-                <th className="th">User</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant">
-              {moves.map((l) => (
-                <tr key={l.id} className="row">
-                  <td className="td font-mono text-[10.5px] whitespace-nowrap">{l.timestamp}</td>
-                  <td className="td">
-                    <Ref className="text-[11px]">{l.ref}</Ref>
-                  </td>
-                  <td className="td">
-                    <Badge tone={l.type === 'DELIVERY' ? 'error' : l.type === 'RECEIPT' ? 'success' : l.type === 'ADJUSTMENT' ? 'warn' : 'teal'}>
-                      {l.type}
-                    </Badge>
-                  </td>
-                  <td className="td max-w-56">
-                    <span className="block truncate text-[11px] text-on-surface/70">
-                      {l.from} → {l.to}
-                    </span>
-                  </td>
-                  <td className="td text-right">
-                    <Delta value={l.delta} />
-                  </td>
-                  <td className="td tnum text-right font-mono text-[11.5px]">{l.balanceAfter}</td>
-                  <td className="td max-w-24 truncate text-[11px] text-on-surface/60">{l.user}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
     </Modal>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Detail route
- * ------------------------------------------------------------------ */
+/* ========================================================== product detail */
 
 export function ProductDetail() {
   const { sku = '' } = useParams();
-  const { snap, run, busy } = useApp();
-  const [loc, setLoc] = useState('');
-  const [counted, setCounted] = useState('');
-  const [reason, setReason] = useState('Incorrect Entry / Counting Error');
-  const [memo, setMemo] = useState('');
+  const navigate = useNavigate();
+  const { snap, can } = useApp();
+  const [moveView, setMoveView] = useState<'timeline' | 'table' | 'chart'>('timeline');
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
 
-  const p = snap?.products.find((x) => x.sku === sku);
-  if (!snap || !p) {
+  const product = snap.products.find((p) => p.sku === sku);
+  const ledger = useMemo(() => snap.ledger.filter((l) => l.sku === sku), [snap.ledger, sku]);
+  const openOrders = useMemo(() => {
+    const out: { ref: string; kind: string; qty: number; to: string; status: string; link: string; scheduledDate: string }[] = [];
+    for (const d of snap.deliveries) {
+      if (d.status === 'Done' || d.status === 'Canceled') continue;
+      for (const line of d.lines) {
+        if (line.sku === sku) out.push({ ref: d.ref, kind: 'Delivery', qty: line.qty, to: d.from, status: d.status, link: `/deliveries/${d.ref}`, scheduledDate: d.scheduledDate });
+      }
+    }
+    for (const r of snap.receipts) {
+      if (r.status === 'Done' || r.status === 'Canceled') continue;
+      for (const line of r.lines) {
+        if (line.sku === sku) out.push({ ref: r.ref, kind: 'Receipt', qty: line.expected, to: r.destination, status: r.status, link: `/receipts/${r.ref}`, scheduledDate: r.scheduledDate });
+      }
+    }
+    for (const t of snap.transfers) {
+      if (t.status === 'Done' || t.status === 'Canceled') continue;
+      for (const line of t.lines) {
+        if (line.sku === sku) out.push({ ref: t.ref, kind: t.to === sku ? 'Transfer in' : 'Transfer out', qty: line.qty, to: t.to, status: t.status, link: `/transfers/${t.ref}`, scheduledDate: t.createdAt.slice(0, 10) });
+      }
+    }
+    return out;
+  }, [snap.deliveries, snap.receipts, snap.transfers, sku]);
+
+  const reservedBy = useMemo(() => {
+    const out: { ref: string; customer: string; qty: number; link: string }[] = [];
+    for (const d of snap.deliveries) {
+      if (!['Ready', 'Picking', 'Packed'].includes(d.status)) continue;
+      for (const line of d.lines) {
+        if (line.sku === sku) out.push({ ref: d.ref, customer: d.customer, qty: line.qty, link: `/deliveries/${d.ref}` });
+      }
+    }
+    return out;
+  }, [snap.deliveries, sku]);
+
+  if (!product) {
     return (
       <Card>
-        <Empty icon="search_off" title={`SKU ${sku} not found`} detail="It may have been renamed or removed from the catalog." />
+        <ErrorState
+          title={`“${sku}” is not in the catalogue`}
+          detail="It may have been renamed or removed. Search for it from the products page."
+          onRetry={() => navigate('/products')}
+          retryLabel="Back to products"
+        />
       </Card>
     );
   }
 
-  const activeLoc = loc || ((p.byLocation ?? []).find((l) => l.qty > 0)?.code ?? snap.locations.find((l) => !l.container)?.code ?? 'WH/Stock/Bay-04');
-  const bookQty = bookQtyIn(p, activeLoc, snap);
-  const delta = counted === '' ? 0 : Number(counted) - bookQty;
-  const dualSignoff = Math.abs(delta) * p.unitCost >= snap.settings.dualSignoffThreshold;
+  const dayFlow = buildFlow(ledger);
+  const maxLocation = Math.max(1, ...product.locations.map((l) => l.qty));
 
   return (
     <>
-      <Link to="/products" className="mb-3 inline-flex items-center gap-1 text-[12px] font-semibold text-on-surface/60 hover:text-primary">
-        <Icon name="arrow_back" size={15} /> Products
-      </Link>
+      <PageHeader
+        eyebrow={`${product.category} · ${product.uom}`}
+        title={product.name}
+        breadcrumb={[
+          { label: 'Overview' },
+          { label: 'Products', to: '/products' },
+          { label: product.sku },
+        ]}
+        description={`${product.sku} · barcode ${product.barcode} · standard cost ${money(product.unitCost, snap.settings.company.currency)} per ${product.uom}`}
+        meta={
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge value={product.health} />
+            <Badge tone="neutral">Reorder at {n(product.reorder.reorderPoint)} {product.uom}</Badge>
+            {product.reserved > 0 && <Badge tone="warning">{n(product.reserved)} {product.uom} reserved</Badge>}
+            {product.incoming > 0 && <Badge tone="info">{n(product.incoming)} {product.uom} incoming</Badge>}
+          </div>
+        }
+        actions={
+          <>
+            <LinkButton to={`/receipts/new?sku=${product.sku}`} icon="south_west">
+              Receive
+            </LinkButton>
+            <LinkButton to={`/transfers/new?sku=${product.sku}`} icon="swap_horiz">
+              Transfer
+            </LinkButton>
+            <LinkButton to={`/deliveries/new?sku=${product.sku}`} icon="north_east">
+              Deliver
+            </LinkButton>
+      {can('adjustment.create') && (
+        <Button variant="primary" icon="rule" onClick={() => setAdjustOpen(true)}>
+          Adjust
+        </Button>
+      )}
+        </>
+      }
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <div className="space-y-4">
-          <Card className="p-5">
-            <div className="flex items-start gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary-container/12 text-primary">
-                <Icon name={p.icon} size={28} fill />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-[19px] leading-tight font-extrabold tracking-tight">{p.name}</h1>
-                  <StatusBadge value={p.status} dot />
-                </div>
-                <p className="ref mt-1 text-[12px] text-on-surface/55">{p.sku}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Badge tone="neutral">{p.category}</Badge>
-                  <Badge tone="teal">Reorder at {p.reorderPoint}</Badge>
-                  {p.reserved > 0 && <Badge tone="warn">{p.reserved} reserved</Badge>}
-                </div>
-              </div>
-            </div>
+          <StatRow
+            columns={4}
+            items={[
+              { label: 'On hand', value: `${n(product.onHand)}`, tone: product.onHand === 0 ? 'danger' : product.health === 'LOW' ? 'warning' : undefined },
+              { label: 'Reserved', value: `${n(product.reserved)}` },
+              { label: 'Available', value: `${n(product.available)}`, tone: 'success' },
+              { label: 'Incoming', value: `${n(product.incoming)}` },
+            ]}
+          />
+          <StatRow
+            columns={3}
+            items={[
+              { label: 'Reorder level', value: `${n(product.reorder.reorderPoint)}` },
+              { label: `Value on hand`, value: money(product.value, snap.settings.company.currency, true) },
+              { label: 'Last updated', value: shortDate(product.updatedAt) },
+            ]}
+          />
 
-            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[
-                { label: 'On hand', value: p.total, unit: p.unit, tone: p.total === 0 ? 'text-error' : '' },
-                { label: 'Free to use', value: p.free, unit: p.unit, tone: 'text-on-surface' },
-                { label: 'Unit cost', value: `${snap.settings.currency}${p.unitCost.toLocaleString('en-IN')}`, unit: '', tone: '' },
-                { label: 'Stock value', value: `${snap.settings.currency}${(p.total * p.unitCost).toLocaleString('en-IN')}`, unit: '', tone: '' },
-              ].map((s) => (
-                <div key={s.label} className="rounded-lg border border-outline-variant bg-surface-low p-2.5">
-                  <p className="text-[10px] font-bold tracking-[0.08em] text-on-surface/50 uppercase">{s.label}</p>
-                  <p className={`tnum mt-0.5 text-[17px] leading-tight font-extrabold ${s.tone}`}>
-                    {s.value}
-                    {s.unit && <span className="ml-1 text-[11px] font-medium text-on-surface/50">{s.unit}</span>}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </Card>
+          <SectionCard
+            title="Location distribution"
+            icon="shelves"
+            action={<Link to="/inventory" className="btn btn-ghost btn-sm">All locations</Link>}
+          >
+            {product.locations.length === 0 ? (
+              <WarnNote tone="danger">
+                {product.name} has no stock in any location. Outbound orders for this product will be blocked until it is
+                received.
+              </WarnNote>
+            ) : (
+              <ul className="space-y-2.5">
+                {product.locations.map((l) => (
+                  <li key={l.code}>
+                    <div className="flex items-baseline justify-between gap-3 text-[12px]">
+                      <Link to={`/locations/${l.code}`} className="min-w-0 truncate font-semibold hover:text-primary">
+                        {l.name}
+                        <span className="ref ml-1.5 text-[10.5px] text-text-subtle">{l.code}</span>
+                      </Link>
+                      <span className="tnum shrink-0 font-mono font-bold">
+                        {n(l.qty)} <span className="text-[10px] font-medium text-text-subtle">{product.uom}</span>
+                      </span>
+                    </div>
+                    <div className="mt-1">
+                      <Meter value={l.qty} max={maxLocation} tone={l.qty / maxLocation < 0.2 ? 'warning' : 'primary'} />
+                    </div>
+                  </li>
+                ))}
+                <li className="flex items-center justify-between border-t border-border pt-2.5 text-[12px] font-bold">
+                  <span>Total</span>
+                  <span className="tnum font-mono">{n(product.onHand)} {product.uom}</span>
+                </li>
+              </ul>
+            )}
+          </SectionCard>
 
-          <Card className="overflow-hidden">
-            <div className="border-b border-outline-variant px-4 py-2.5">
-              <SectionTitle icon="receipt_long">Move history · {snap.ledger.filter((l) => l.sku === p.sku).length} rows</SectionTitle>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
-                <thead className="border-b border-outline-variant bg-surface-low">
+          <SectionCard
+            title="Stock movement"
+            icon="receipt_long"
+            action={
+              <Segmented
+                value={moveView}
+                onChange={setMoveView}
+                ariaLabel="Movement view"
+                options={[
+                  { value: 'timeline', label: 'Timeline', icon: 'timeline' },
+                  { value: 'table', label: 'Table', icon: 'table_rows' },
+                  { value: 'chart', label: 'Chart', icon: 'show_chart' },
+                ]}
+              />
+            }
+          >
+            {ledger.length === 0 ? (
+              <EmptyState
+                icon="history"
+                title="No movements recorded yet"
+                detail="This product has never been received, delivered, transferred or adjusted."
+              />
+            ) : moveView === 'timeline' ? (
+              <Timeline
+                items={ledger.map((entry) => ({
+                  at: entry.at,
+                  time: entry.at.slice(11, 16),
+                  title: `${LEDGER_LABEL[entry.type]} · ${entry.ref}`,
+                  detail: entry.note,
+                  meta: (
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-[10.5px] text-text-subtle">
+                      <span>{entry.from} → {entry.to}</span>
+                      <Delta value={entry.delta} />
+                      <span>balance {n(entry.balanceAfter)} {product.uom}</span>
+                      <span>· {entry.user}</span>
+                    </p>
+                  ),
+                  tone: (entry.delta > 0 ? 'success' : entry.delta < 0 ? 'danger' : 'info') as 'success' | 'danger' | 'info',
+                  icon: LEDGER_ICON[entry.type] ?? 'swap_horiz',
+                }))}
+              />
+            ) : moveView === 'table' ? (
+              <Table>
+                <thead className="border-b border-border">
                   <tr>
-                    <th className="th">When</th>
-                    <th className="th">Ref</th>
-                    <th className="th">Type</th>
-                    <th className="th">From → To</th>
-                    <th className="th text-right">Δ</th>
-                    <th className="th text-right">Balance</th>
-                    <th className="th">User</th>
+                    <Th>When</Th>
+                    <Th>Reference</Th>
+                    <Th>Operation</Th>
+                    <Th>From → To</Th>
+                    <Th align="right">Change</Th>
+                    <Th align="right">Balance</Th>
+                    <Th>User</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-outline-variant">
-                  {(snap.ledger.filter((l) => l.sku === p.sku).length
-                    ? snap.ledger.filter((l) => l.sku === p.sku)
-                    : []
-                  ).map((l) => (
-                    <tr key={l.id} className="row">
-                      <td className="td font-mono text-[10.5px] whitespace-nowrap">{l.timestamp}</td>
-                      <td className="td">
-                        <Ref className="text-[11px]">{l.ref}</Ref>
-                      </td>
-                      <td className="td">
-                        <Badge tone={l.type === 'DELIVERY' ? 'error' : l.type === 'RECEIPT' ? 'success' : l.type === 'ADJUSTMENT' ? 'warn' : 'teal'}>
-                          {l.type}
+                <tbody className="divide-y divide-border">
+                  {ledger.map((entry) => (
+                    <tr key={entry.id} className="row">
+                      <Td className="whitespace-nowrap font-mono text-[10.5px]">{stamp(entry.at)}</Td>
+                      <Td>
+                        <span className="ref text-[11.5px]">{entry.ref}</span>
+                      </Td>
+                      <Td>
+                        <Badge tone={entry.type === 'DELIVERY' ? 'danger' : entry.type === 'RECEIPT' ? 'success' : entry.type === 'ADJUSTMENT' ? 'warning' : 'info'}>
+                          {LEDGER_LABEL[entry.type]}
                         </Badge>
-                      </td>
-                      <td className="td max-w-64">
-                        <span className="block truncate text-[11px] text-on-surface/70">{l.from} → {l.to}</span>
-                      </td>
-                      <td className="td text-right">
-                        <Delta value={l.delta} />
-                      </td>
-                      <td className="td tnum text-right font-mono text-[11.5px]">{l.balanceAfter}</td>
-                      <td className="td max-w-28 truncate text-[11px] text-on-surface/60">{l.user}</td>
+                      </Td>
+                      <Td className="max-w-64">
+                        <span className="block truncate text-[11px] text-text-muted">
+                          {entry.from} <Icon name="arrow_right_alt" size={12} className="inline" /> {entry.to}
+                        </span>
+                      </Td>
+                      <Td align="right">
+                        <Delta value={entry.delta} />
+                      </Td>
+                      <Td align="right" className="tnum font-mono text-[12px] font-bold">
+                        {n(entry.balanceAfter)}
+                      </Td>
+                      <Td className="max-w-28 truncate text-[11.5px] text-text-muted">{entry.user}</Td>
                     </tr>
                   ))}
-                  {snap.ledger.filter((l) => l.sku === p.sku).length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="td text-center text-on-surface/45">
-                        No stock moves recorded for this SKU.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
-              </table>
-            </div>
-          </Card>
+              </Table>
+            ) : (
+              <FlowChart data={dayFlow} format={(v) => `${signed(v)} ${product.uom}`} />
+            )}
+          </SectionCard>
         </div>
 
         <div className="space-y-4">
-          <Card className="p-4">
-            <SectionTitle icon="warehouse">Where it sits</SectionTitle>
-            <ul className="space-y-1.5">
-              {(p.byLocation ?? [])
-                .filter((l) => l.qty > 0)
-                .map((l) => {
-                  const pct = p.total > 0 ? (l.qty / p.total) * 100 : 0;
-                  return (
-                    <li key={l.code}>
-                      <div className="flex items-center justify-between text-[11.5px]">
-                        <span className="ref truncate">{l.code}</span>
-                        <span className="tnum font-mono font-bold">
-                          {l.qty} {p.unit}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-surface-container">
-                        <div className="h-full rounded-full bg-tertiary" style={{ width: `${pct}%` }} />
-                      </div>
-                      <p className="mt-0.5 text-[10px] text-on-surface/45">{l.name}</p>
-                    </li>
-                  );
-                })}
-              {p.total === 0 && (
-                <li className="rounded-lg bg-error-container px-3 py-2.5 text-[11.5px] text-on-error-container">
-                  <p className="flex items-center gap-1.5 font-bold">
-                    <Icon name="error" size={15} /> Out of stock everywhere
-                  </p>
-                  <p className="mt-1">
-                    Outbound orders for this SKU will fail validation until stock is received.
-                  </p>
-                </li>
-              )}
-            </ul>
-          </Card>
+          <SectionCard title="Reorder rule" icon="rule">
+            <KeyValue
+              items={[
+                { label: 'Minimum stock', value: `${n(product.reorder.minStock)} ${product.uom}` },
+                { label: 'Reorder level', value: `${n(product.reorder.reorderPoint)} ${product.uom}` },
+                { label: 'Safety stock', value: `${n(product.reorder.safetyStock)} ${product.uom}` },
+                { label: 'Suggested order', value: `${n(product.reorder.reorderQty)} ${product.uom}` },
+                { label: 'Preferred supplier', value: product.reorder.preferredSupplier },
+                { label: 'Lead time', value: `${product.reorder.leadTimeDays} days` },
+              ]}
+            />
+            <Link to="/reorder-rules" className="btn btn-secondary btn-sm mt-3 w-full">
+              Edit reorder rules
+            </Link>
+          </SectionCard>
 
-          <Card className="p-4">
-            <SectionTitle icon="edit_note">Post a physical count</SectionTitle>
-            <div className="space-y-3">
-              <Field label="Count location">
-                <select value={activeLoc} onChange={(e) => setLoc(e.target.value)} className="field">
-                  {snap.locations.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.code} — {l.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label={`Book qty at ${activeLoc}`}>
-                  <input readOnly value={bookQty} className="field tnum font-mono opacity-70" />
-                </Field>
-                <Field label="Counted">
-                  <input
-                    type="number"
-                    min={0}
-                    value={counted}
-                    onChange={(e) => setCounted(e.target.value)}
-                    className="field tnum font-mono"
-                    placeholder="0"
-                  />
-                </Field>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-outline-variant bg-surface-low px-3 py-2">
-                <span className="text-[12px] font-semibold">Variance</span>
-                <span className="flex items-baseline gap-2">
-                  <Delta value={delta} />
-                  <span className="tnum text-[11px] text-on-surface/60">
-                    {snap.settings.currency}
-                    {(delta * p.unitCost).toLocaleString('en-IN')}
-                  </span>
-                </span>
-              </div>
-              {dualSignoff && (
-                <p className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning-container px-2.5 py-1.5 text-[11px] text-on-warning-container">
-                  <Icon name="verified_user" size={14} className="mt-px shrink-0" /> Dual sign-off required.
-                </p>
-              )}
-              <Field label="Reason">
-                <select value={reason} onChange={(e) => setReason(e.target.value)} className="field">
-                  {[
-                    'Damaged in Transit',
-                    'Missing / Investigation',
-                    'Incorrect Entry / Counting Error',
-                    'Scrap / Wear & Tear',
-                    'Supplier Surplus',
-                    'Other',
-                  ].map((r) => (
-                    <option key={r}>{r}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Memo">
-                <textarea
-                  rows={2}
-                  value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
-                  className="field resize-none"
-                />
-              </Field>
-              <button
-                className="btn btn-primary w-full justify-center"
-                disabled={busy || counted === ''}
-                onClick={() => {
-                  if (counted === '') return;
-                  void run(
-                    `Count for ${p.sku}`,
-                    async () => {
-                      const created = await api.createCount({
-                        sku: p.sku,
-                        location: activeLoc,
-                        recorded: bookQty,
-                        counted: Number(counted),
-                        reason,
-                        memo});
-                      return api.postAdjustment({
-                        ref: created.ref,
-                        counted: Number(counted),
-                        reason: reason as never,
-                        memo
-                      });
-                    },
-                    { success: `Count posted for ${p.sku}` },
-                  );
-                }}
-              >
-                <Icon name="publish" size={16} /> Post variance
-              </button>
-            </div>
-          </Card>
+          <SectionCard title="Reserved for" icon="lock">
+            {reservedBy.length === 0 ? (
+              <p className="text-[12px] text-text-muted">Nothing is reserved for this product.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {reservedBy.map((r) => (
+                  <li key={r.ref}>
+                    <Link to={r.link} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-muted">
+                      <span className="min-w-0 truncate text-[12px]">
+                        <span className="ref">{r.ref}</span> · {r.customer}
+                      </span>
+                      <span className="tnum shrink-0 font-mono text-[12px] font-bold">{n(r.qty)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Open commitments" icon="event">
+            {openOrders.length === 0 ? (
+              <p className="text-[12px] text-text-muted">No open receipts, deliveries or transfers for this product.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {openOrders.map((o) => (
+                  <li key={`${o.ref}-${o.kind}`}>
+                    <Link to={o.link} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-muted">
+                      <Badge tone={o.kind === 'Receipt' ? 'success' : o.kind === 'Delivery' ? 'danger' : 'info'}>{o.kind}</Badge>
+                      <span className="ref min-w-0 flex-1 truncate text-[11.5px]">{o.ref}</span>
+                      <span className="tnum shrink-0 font-mono text-[11.5px] font-bold">{n(o.qty)}</span>
+                      <StatusBadge value={o.status} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Why the numbers look like this" icon="help">
+            <ul className="space-y-2.5 text-[11.5px] leading-relaxed text-text-muted">
+              <li>
+                <b className="text-text">On hand</b> is everything held in every storage bin across the network.
+              </li>
+              <li>
+                <b className="text-text">Reserved</b> is the quantity committed to deliveries that are ready, being
+                picked or packed.
+              </li>
+              <li>
+                <b className="text-text">Available</b> is on hand minus reserved — what a new order can promise.
+              </li>
+              <li>
+                <b className="text-text">Incoming</b> is what confirmed receipts still have to deliver.
+              </li>
+            </ul>
+          </SectionCard>
         </div>
       </div>
+
+      {transferOpen && (
+        <Modal open onClose={() => setTransferOpen(false)} title="Move stock">
+          <p className="text-[12.5px] text-text-muted">
+            Use the transfer page for a full source → destination view with the before and after balances.
+          </p>
+          <Link to={`/transfers/new?sku=${product.sku}`} className="btn btn-primary mt-3">
+            Open the transfer form
+          </Link>
+        </Modal>
+      )}
+
+      <QuickAdjustDialog product={adjustOpen ? product : null} onClose={() => setAdjustOpen(false)} />
     </>
   );
+}
+
+function buildFlow(ledger: { at: string; delta: number }[]): [string, number][] {
+  const map = new Map<string, number>();
+  for (const entry of ledger) {
+    const key = entry.at.slice(0, 10);
+    map.set(key, (map.get(key) ?? 0) + entry.delta);
+  }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-21);
 }

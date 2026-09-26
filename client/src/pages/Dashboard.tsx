@@ -1,314 +1,510 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApp } from '../store';
-import { ScenarioBar } from '../components/chrome';
-import { Badge, Card, Icon, PageHeader, Ref, SectionTitle, StatusBadge } from '../components/ui';
+import { useApp, useSnap } from '../store';
+import { money, percent, qty as n, shortDate, signed, timeOnly } from '../lib/format';
+import type { AttentionItem, Tone } from '../types';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  FlowChart,
+  Icon,
+  KpiCard,
+  LiveDot,
+  LinkButton,
+  Modal,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  Timeline,
+  WarnNote,
+} from '../components/design';
+import { DemoModeBar } from '../components/AppShell';
+import { demoService } from '../services';
 
-const money = (n: number, c = '₹') =>
-  n >= 1e7 ? `${c}${(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `${c}${(n / 1e5).toFixed(2)} L` : `${c}${n.toLocaleString('en-IN')}`;
+const SEVERITY_TONE: Record<AttentionItem['severity'], Tone> = {
+  critical: 'danger',
+  warning: 'warning',
+  info: 'info',
+};
+
+const SEVERITY_ICON: Record<AttentionItem['kind'], string> = {
+  'low-stock': 'trending_down',
+  'out-of-stock': 'error',
+  'blocked-delivery': 'block',
+  'overdue-delivery': 'schedule',
+  'receipt-ready': 'move_to_inbox',
+  'receipt-overdue': 'event_busy',
+  approval: 'approval',
+  'count-due': 'fact_check',
+  'transfer-ready': 'compare_arrows',
+};
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export default function Dashboard() {
-  const { snap } = useApp();
-  if (!snap) return null;
+  const { user, run, busy, can, refresh } = useApp();
+  const snap = useSnap();
+  const [attentionFilter, setAttentionFilter] = useState<'all' | AttentionItem['severity']>('all');
+  const [resetOpen, setResetOpen] = useState(false);
+
   const d = snap.dashboard;
+  const currency = d.currency;
 
-  const kpis = [
-    {
-      label: 'Inventory value',
-      value: money(d.valuation, snap.settings.currency),
-      // Quantities span kg, units and rolls, so the total is deliberately not
-      // labelled "units" — that would misstate eight of the ten SKUs.
-      sub: `${d.catalogSkus} active SKUs · ${d.totalOnHand.toLocaleString('en-IN')} on hand (mixed UoM)`,
-      icon: 'account_balance_wallet',
-      tone: 'plum' as const,
-      to: '/products',
-    },
-    {
-      label: 'Free to allocate',
-      value: d.freeToAllocate.toLocaleString('en-IN'),
-      sub: `${d.reserved} reserved against open orders`,
-      icon: 'inventory',
-      tone: 'teal' as const,
-      to: '/products',
-    },
-    {
-      label: 'Outbound queue',
-      value: d.pendingDeliveries.toString(),
-      sub: `${d.readyDeliveries} ready · ${d.waitingDeliveries} waiting · ${d.overdueDeliveries} overdue`,
-      icon: 'local_shipping',
-      tone: d.overdueDeliveries > 0 ? ('error' as const) : ('neutral' as const),
-      to: '/deliveries',
-    },
-    {
-      label: 'Inbound queue',
-      value: d.pendingReceipts.toString(),
-      sub: `${d.lateReceipts} late · ${d.scheduledTransfers} transfers scheduled`,
-      icon: 'move_to_inbox',
-      tone: d.lateReceipts > 0 ? ('warn' as const) : ('neutral' as const),
-      to: '/receipts',
-    },
-  ];
+  const attention = useMemo(
+    () => (attentionFilter === 'all' ? d.attention : d.attention.filter((a) => a.severity === attentionFilter)),
+    [d.attention, attentionFilter],
+  );
 
-  const attention = [
-    ...d.lowStock.slice(0, 4).map((p) => ({
-      key: p.sku,
-      to: `/products/${p.sku}`,
-      icon: p.icon,
-      title: p.name,
-      meta: `${p.sku} · ${p.total} ${p.unit} on hand`,
-      status: p.status,
-      cta: p.total === 0 ? 'Replenish' : 'Review',
-    })),
-    ...snap.deliveries
-      .filter((x) => x.attention?.kind === 'Overdue')
-      .slice(0, 2)
-      .map((x) => ({
-        key: x.ref,
-        to: `/deliveries/${encodeURIComponent(x.ref)}`,
-        icon: 'warning',
-        title: `${x.ref} overdue`,
-        meta: `${x.items.length} line(s) to ${x.contact} · ${x.attention?.message ?? ''}`,
-        status: x.status,
-        cta: 'Reallocate',
-      })),
-    ...snap.receipts
-      .filter((x) => x.attention?.kind === 'Overdue')
-      .slice(0, 1)
-      .map((x) => ({
-        key: x.ref,
-        to: `/receipts/${encodeURIComponent(x.ref)}`,
-        icon: 'warning',
-        title: `${x.ref} overdue`,
-        meta: `${x.items.length} line(s) from ${x.supplier} · ${x.attention?.message ?? ''}`,
-        status: x.status,
-        cta: 'Chase',
-      })),
-    ...snap.adjustments
-      .filter((a) => a.state === 'Pending Approval')
-      .slice(0, 2)
-      .map((a) => ({
-        key: a.ref,
-        to: '/counts',
-        icon: 'fact_check',
-        title: `${a.ref} awaiting approval`,
-        meta: `${a.sku} at ${a.location} · ${a.delta >= 0 ? '+' : ''}${a.delta} ${a.reason}`,
-        status: 'Pending Approval' as const,
-        cta: 'Review',
-      })),
-  ];
+  const criticalCount = d.attention.filter((a) => a.severity === 'critical').length;
+  const firstName = user?.name.split(' ')[0] ?? 'there';
+
+  const nextActions = [
+    can('receipt.create') && d.pendingReceipts > 0
+      ? { to: '/receipts', label: 'Work the inbound queue', icon: 'move_to_inbox', count: d.pendingReceipts }
+      : null,
+    can('delivery.pick') && d.pendingDeliveries > 0
+      ? { to: '/deliveries', label: 'Pick and dispatch', icon: 'local_shipping', count: d.pendingDeliveries }
+      : null,
+    can('transfer.post') && d.openTransfers > 0
+      ? { to: '/transfers', label: 'Move stock between locations', icon: 'swap_horiz', count: d.openTransfers }
+      : null,
+    can('adjustment.approve') && d.pendingApprovals > 0
+      ? { to: '/adjustments', label: 'Approve count variances', icon: 'approval', count: d.pendingApprovals }
+      : null,
+    can('count.create') && d.openCounts > 0
+      ? { to: '/counts', label: 'Finish the scheduled counts', icon: 'fact_check', count: d.openCounts }
+      : null,
+    d.lowStockCount > 0
+      ? { to: '/low-stock', label: 'Replenish low stock', icon: 'trending_down', count: d.lowStockCount }
+      : null,
+  ].filter(Boolean) as { to: string; label: string; icon: string; count: number }[];
 
   return (
     <>
       <PageHeader
-        eyebrow="Enterprise Logistics & Inventory"
-        title="Operations cockpit"
-        subtitle="Live balances, document queues and the audit trail. Every number below is computed by the server, not the browser."
+        eyebrow="Inventory Operations"
+        title="StockSense"
+        breadcrumb={[{ label: 'Overview' }, { label: 'Dashboard' }]}
+        description={`${greeting()}, ${firstName}. Here is the current operational picture across your ${d.warehouses} warehouses.`}
+        meta={
+          <div className="flex flex-wrap items-center gap-2">
+            <LiveDot />
+            <span className="text-[11.5px] text-text-muted">
+              {d.catalogSkus} products · {d.locations} storage locations · {d.ledgerEntries} ledger rows
+            </span>
+          </div>
+        }
         actions={
           <>
-            <Link to="/receipts?new=1" className="btn btn-outline">
-              <Icon name="move_to_inbox" size={16} /> Receive
-            </Link>
-            <Link to="/deliveries?new=1" className="btn btn-primary">
-              <Icon name="add" size={16} /> New delivery
-            </Link>
+            <LinkButton to="/scanner" icon="qr_code_scanner">
+              Scan
+            </LinkButton>
+            {canAnyNew() && (
+              <LinkButton to="/receipts/new" variant="primary" icon="add">
+                New operation
+              </LinkButton>
+            )}
           </>
         }
       />
 
-      <ScenarioBar />
+      <div className="mb-4">
+        <DemoModeBar onReset={() => setResetOpen(true)} />
+      </div>
 
+      {/* ------------------------------------------------------------ KPIs */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((k) => (
-          <Link key={k.label} to={k.to} className="card group p-4 transition hover:border-primary/40">
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-[11px] font-bold tracking-[0.08em] text-on-surface/50 uppercase">
-                {k.label}
-              </p>
-              <Badge tone={k.tone}>
-                <Icon name={k.icon} size={13} />
-              </Badge>
-            </div>
-            <p className="tnum mt-1.5 text-[26px] leading-none font-extrabold tracking-tight">
-              {k.value}
-            </p>
-            <p className="mt-1.5 text-[11.5px] text-on-surface/55">{k.sub}</p>
-          </Link>
-        ))}
+        <KpiCard
+          label="Total stock"
+          icon="inventory_2"
+          tone="primary"
+          value={n(d.totalStock).toLocaleString('en-IN')}
+          sub={`${d.available.toLocaleString('en-IN')} available · ${d.reserved.toLocaleString('en-IN')} reserved`}
+          to="/products"
+        />
+        <KpiCard
+          label="Inventory value"
+          icon="account_balance_wallet"
+          tone="info"
+          value={money(d.inventoryValue, currency, true)}
+          sub={`At standard cost across ${d.catalogSkus} products`}
+          to="/reports/stock-valuation"
+        />
+        <KpiCard
+          label="Low stock"
+          icon="trending_down"
+          tone={d.lowStockCount > 0 ? 'warning' : 'success'}
+          value={d.lowStockCount}
+          sub={`${d.outOfStockCount} out of stock · ${d.lowStockCount - d.outOfStockCount} below reorder level`}
+          to="/low-stock"
+        />
+        <KpiCard
+          label="Inventory accuracy"
+          icon="verified"
+          tone={d.accuracy >= 99 ? 'success' : d.accuracy >= 97 ? 'warning' : 'danger'}
+          value={percent(d.accuracy)}
+          sub="Physical counts against the book position"
+          to="/reports/inventory-accuracy"
+        />
+        <KpiCard
+          label="Pending receipts"
+          icon="move_to_inbox"
+          tone="info"
+          value={d.pendingReceipts}
+          sub="Goods expected into the network"
+          to="/receipts"
+        />
+        <KpiCard
+          label="Pending deliveries"
+          icon="local_shipping"
+          tone={d.blockedDeliveries > 0 ? 'danger' : 'primary'}
+          value={d.pendingDeliveries}
+          sub={d.blockedDeliveries > 0 ? `${d.blockedDeliveries} blocked by a shortage` : 'All orders can be fulfilled'}
+          to="/deliveries"
+        />
+        <KpiCard
+          label="Transfers"
+          icon="swap_horiz"
+          tone={d.openTransfers > 0 ? 'warning' : 'neutral'}
+          value={d.openTransfers}
+          sub="Internal moves still to complete"
+          to="/transfers"
+        />
+        <KpiCard
+          label="Needs a decision"
+          icon="priority_high"
+          tone={criticalCount > 0 ? 'danger' : d.attention.length > 0 ? 'warning' : 'success'}
+          value={d.attention.length}
+          sub={`${d.pendingApprovals} awaiting approval · ${d.openCounts} counts open`}
+          to="/dashboard#attention"
+        />
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_1fr]">
-        <div>
-          <SectionTitle icon="priority_high" right={<Link to="/counts" className="btn btn-outline !py-1.5">Open counts</Link>}>
-            Needs attention
-          </SectionTitle>
-          <Card className="divide-y divide-outline-variant">
-            {attention.length === 0 && (
-              <p className="px-4 py-8 text-center text-[12.5px] text-on-surface/50">
-                Nothing is blocked right now.
-              </p>
-            )}
-            {attention.map((a) => (
-              <Link
-                key={a.key}
-                to={a.to}
-                className="row flex items-center gap-3 px-4 py-2.5 hover:bg-surface-low"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-container text-primary">
-                  <Icon name={a.icon} size={17} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] font-semibold">{a.title}</span>
-                  <span className="block truncate text-[11px] text-on-surface/50">{a.meta}</span>
-                </span>
-                <StatusBadge value={a.status} dot />
-                <Icon name="chevron_right" size={17} className="text-outline" />
-              </Link>
-            ))}
-          </Card>
-        </div>
-
-        <div>
-          <SectionTitle icon="receipt_long" right={<Link to="/ledger" className="btn btn-outline !py-1.5">Full ledger</Link>}>
-            Latest stock moves
-          </SectionTitle>
+      {/* --------------------------------------- needs attention + timeline */}
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <div id="attention" className="scroll-mt-20">
           <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b border-outline-variant bg-surface-low">
-                  <tr>
-                    <th className="th">Ref</th>
-                    <th className="th">SKU</th>
-                    <th className="th">Type</th>
-                    <th className="th text-right">Δ Qty</th>
-                    <th className="th text-right">Balance</th>
-                    <th className="th">User</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-outline-variant">
-                  {snap.ledger.slice(0, 8).map((l) => (
-                    <tr key={l.id} className="row">
-                      <td className="td">
-                        <Ref className="text-[11.5px]">{l.ref}</Ref>
-                      </td>
-                      <td className="td max-w-40">
-                        <span className="block truncate text-[12px]">{l.name}</span>
-                        <span className="ref block text-[10px] text-on-surface/45">{l.sku}</span>
-                      </td>
-                      <td className="td">
-                        <Badge tone={l.type === 'DELIVERY' ? 'error' : l.type === 'RECEIPT' ? 'success' : l.type === 'ADJUSTMENT' ? 'warn' : 'teal'}>
-                          {l.type}
-                        </Badge>
-                      </td>
-                      <td className="td text-right">
-                        <span
-                          className={`tnum font-mono text-[12px] font-bold ${
-                            l.delta > 0 ? 'text-success' : l.delta < 0 ? 'text-error' : 'text-outline'
-                          }`}
-                        >
-                          {l.delta > 0 ? '+' : ''}
-                          {l.delta}
-                        </span>
-                      </td>
-                      <td className="td tnum text-right font-mono text-[12px]">{l.balanceAfter}</td>
-                      <td className="td max-w-28 truncate text-[11.5px] text-on-surface/60">{l.user}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+              <h2 className="flex items-center gap-2 text-[13px] font-bold">
+                <Icon name="priority_high" size={17} className="text-danger" />
+                Needs attention
+                {criticalCount > 0 && (
+                  <Badge tone="danger" className="ml-1">
+                    {criticalCount} critical
+                  </Badge>
+                )}
+              </h2>
+              <div className="flex gap-1">
+                {(['all', 'critical', 'warning', 'info'] as const).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setAttentionFilter(key)}
+                    className={`rounded-control px-2 py-1 text-[11.5px] font-semibold capitalize ${
+                      attentionFilter === key ? 'bg-primary-soft text-primary' : 'text-text-muted hover:bg-surface-muted'
+                    }`}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="border-t border-outline-variant bg-surface-low px-4 py-2 text-[10.5px] text-on-surface/50">
-              Append-only. Transfers are recorded with Δ 0 because relocating stock never changes the
-              enterprise balance.
-            </p>
+
+            {attention.length === 0 ? (
+              <EmptyState
+                icon="task_alt"
+                title="Nothing needs you right now"
+                detail="Every document is moving and no item has crossed its reorder level."
+              />
+            ) : (
+              <ul className="divide-y divide-border">
+                {attention.map((item) => (
+                  <li key={item.id} className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-surface-muted">
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                        item.severity === 'critical'
+                          ? 'bg-danger-soft text-danger'
+                          : item.severity === 'warning'
+                            ? 'bg-warning-soft text-warning'
+                            : 'bg-info-soft text-info'
+                      }`}
+                    >
+                      <Icon name={SEVERITY_ICON[item.kind] ?? 'info'} size={17} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12.5px] font-bold">{item.title}</p>
+                      <p className="truncate text-[11.5px] text-text-muted">{item.detail}</p>
+                    </div>
+                    <span
+                      className={`hidden shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase sm:inline ${
+                        item.severity === 'critical'
+                          ? 'border-danger-border bg-danger-soft text-danger-ink'
+                          : item.severity === 'warning'
+                            ? 'border-warning-border bg-warning-soft text-warning-ink'
+                            : 'border-info-border bg-info-soft text-info-ink'
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                    <Link to={item.link} className="btn btn-secondary btn-sm shrink-0">
+                      {item.cta}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
+
+          {nextActions.length > 0 && (
+            <Card className="mt-4 p-4">
+              <h2 className="mb-2.5 flex items-center gap-2 text-[13px] font-bold">
+                <Icon name="arrow_forward" size={17} className="text-primary" />
+                What to do next
+              </h2>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {nextActions.map((action) => (
+                  <Link
+                    key={action.to + action.label}
+                    to={action.to}
+                    className="flex min-h-11 items-center gap-2.5 rounded-card border border-border px-3 py-2.5 transition hover:border-primary/50"
+                  >
+                    <Icon name={action.icon} size={18} className="text-primary" />
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{action.label}</span>
+                    <Badge tone="neutral">{action.count}</Badge>
+                  </Link>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <SectionCard
+            title="Operations timeline"
+            icon="bolt"
+            action={<LiveDot />}
+          >
+            <Timeline
+              emptyLabel="No movements yet. Validate a receipt to start the timeline."
+              items={d.timeline.map((event) => ({
+                at: event.at,
+                time: timeOnly(event.at),
+                title: event.summary,
+                detail: event.detail,
+                tone: (event.severity === 'critical'
+                  ? 'danger'
+                  : event.severity === 'warning'
+                    ? 'warning'
+                    : event.severity === 'success'
+                      ? 'success'
+                      : 'info') as Tone,
+                icon:
+                  event.type === 'STOCK_RECEIVED'
+                    ? 'south_west'
+                    : event.type === 'STOCK_DELIVERED'
+                      ? 'north_east'
+                      : event.type === 'STOCK_TRANSFERRED'
+                        ? 'compare_arrows'
+                        : event.type === 'STOCK_ADJUSTED'
+                          ? 'rule'
+                          : event.type === 'LOW_STOCK_TRIGGERED'
+                            ? 'trending_down'
+                            : 'description',
+                to: event.link,
+              }))}
+            />
+            <Link to="/moves" className="btn btn-ghost btn-sm mt-2 w-full">
+              Open the full move history
+            </Link>
+          </SectionCard>
         </div>
       </div>
 
+      {/* ------------------------------------------ queues, stock, accuracy */}
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <Card className="p-4">
-          <SectionTitle icon="deployed_code" >Network</SectionTitle>
-          <ul className="space-y-2">
-            {snap.warehouses.map((w) => (
-              <li key={w.code} className="flex items-center gap-2.5">
-                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-tertiary-container text-on-tertiary-container">
-                  <Icon name="warehouse" size={15} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-semibold">{w.name}</span>
-                  <span className="block text-[10.5px] text-on-surface/50">
-                    {w.locationCount} locations · {w.capacityUsedPct}% utilised
-                  </span>
-                </span>
-                <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-container">
-                  <div
-                    className={`h-full rounded-full ${w.capacityUsedPct > 88 ? 'bg-error' : w.capacityUsedPct > 70 ? 'bg-warning' : 'bg-success'}`}
-                    style={{ width: `${w.capacityUsedPct}%` }}
+        <SectionCard title="Low stock" icon="trending_down" action={<Link to="/low-stock" className="btn btn-ghost btn-sm">All items</Link>}>
+          {d.outOfStockList.length + d.lowStockList.length === 0 ? (
+            <EmptyState icon="check_circle" title="Everything is above its reorder level" compact />
+          ) : (
+            <ul className="space-y-2">
+              {[...d.outOfStockList, ...d.lowStockList].slice(0, 6).map((item) => (
+                <li key={item.sku} className="flex items-center gap-2.5">
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      item.onHand === 0 ? 'bg-danger' : 'bg-warning'
+                    }`}
                   />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card className="p-4">
-          <SectionTitle icon="swap_horiz">Transfers in flight</SectionTitle>
-          <ul className="space-y-2">
-            {snap.transfers.map((t) => (
-              <li key={t.ref} className="flex items-center gap-2.5">
-                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-surface-container text-primary">
-                  <Icon name="compare_arrows" size={15} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5 text-[12px] font-semibold">
-                    <Ref className="text-[11px]">{t.ref}</Ref>
-                    <span className="truncate text-on-surface/60">
-                      {t.from} → {t.to}
-                    </span>
+                  <Link to={`/products/${item.sku}`} className="min-w-0 flex-1 truncate text-[12px] font-semibold hover:text-primary">
+                    {item.name}
+                  </Link>
+                  <span className="tnum shrink-0 font-mono text-[11.5px]">
+                    {n(item.onHand)} / {n(item.reorderPoint)} {item.uom}
                   </span>
-                  <span className="block text-[10.5px] text-on-surface/50">
-                    {t.qty} × {t.sku} · {t.requestedBy}
-                  </span>
-                </span>
-                <StatusBadge value={t.status} dot />
-              </li>
-            ))}
-          </ul>
-        </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
 
-        <Card className="p-4">
-          <SectionTitle icon="shield_lock">Control settings</SectionTitle>
-          <ul className="space-y-2 text-[12px]">
-            <li className="flex items-center justify-between gap-2">
-              <span className="text-on-surface/65">Negative stock</span>
-              <StatusBadge
-                value={snap.settings.preventNegativeStock ? 'Blocked' : 'Allowed'}
-              />
-            </li>
-            <li className="flex items-center justify-between gap-2">
-              <span className="text-on-surface/65">Valuation</span>
-              <Badge tone="teal">{snap.settings.valuationMethod}</Badge>
-            </li>
-            <li className="flex items-center justify-between gap-2">
-              <span className="text-on-surface/65">Removal strategy</span>
-              <Badge tone="teal">{snap.settings.removalStrategy}</Badge>
-            </li>
-            <li className="flex items-center justify-between gap-2">
-              <span className="text-on-surface/65">Dual sign-off at</span>
-              <span className="tnum font-mono text-[11.5px]">
-                {snap.settings.currency}
-                {snap.settings.dualSignoffThreshold.toLocaleString('en-IN')} or{' '}
-                {snap.settings.dualSignoffVariancePct}%
-              </span>
-            </li>
-            <li className="flex items-center justify-between gap-2">
-              <span className="text-on-surface/65">Ledger entries</span>
-              <span className="tnum font-mono text-[11.5px]">{snap.ledger.length}</span>
-            </li>
+        <SectionCard title="Stock value by warehouse" icon="warehouse" action={<Link to="/warehouses" className="btn btn-ghost btn-sm">Details</Link>}>
+          <ul className="space-y-2.5">
+            {snap.warehousesSummary.map((w) => {
+              const max = Math.max(1, ...snap.warehousesSummary.map((x) => x.stockValue));
+              return (
+                <li key={w.code}>
+                  <div className="flex items-baseline justify-between gap-2 text-[11.5px]">
+                    <Link to={`/warehouses/${w.code}`} className="truncate font-semibold hover:text-primary">
+                      {w.name}
+                    </Link>
+                    <span className="tnum shrink-0 font-mono font-bold">{money(w.stockValue, currency, true)}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-sunken">
+                    <div
+                      className={`h-full rounded-full ${w.utilisation > 88 ? 'bg-danger' : w.utilisation > 70 ? 'bg-warning' : 'bg-primary'}`}
+                      style={{ width: `${(w.stockValue / max) * 100}%` }}
+                    />
+                  </div>
+                  <p className="mt-0.5 text-[10.5px] text-text-subtle">
+                    {w.utilisation}% utilised · {w.products} products · in {n(w.incoming)} / out {n(w.outgoing)}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
-          <Link to="/settings" className="btn btn-outline mt-3 w-full justify-center !py-1.5">
-            <Icon name="tune" size={15} /> Control settings
-          </Link>
-        </Card>
+        </SectionCard>
+
+        <SectionCard title="Recent stock movements" icon="receipt_long" action={<Link to="/moves" className="btn btn-ghost btn-sm">All moves</Link>}>
+          {snap.ledger.length === 0 ? (
+            <EmptyState icon="receipt_long" title="No movements yet" compact />
+          ) : (
+            <ul className="divide-y divide-border">
+              {snap.ledger.slice(0, 6).map((entry) => (
+                <li key={entry.id} className="flex items-center gap-2.5 py-2">
+                  <span
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                      entry.delta > 0
+                        ? 'bg-success-soft text-success'
+                        : entry.delta < 0
+                          ? 'bg-danger-soft text-danger'
+                          : 'bg-info-soft text-info'
+                    }`}
+                  >
+                    <Icon
+                      name={entry.type === 'TRANSFER' ? 'compare_arrows' : entry.delta >= 0 ? 'south_west' : 'north_east'}
+                      size={15}
+                    />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-semibold">{entry.name}</p>
+                    <p className="truncate text-[10.5px] text-text-subtle">
+                      <span className="ref">{entry.ref}</span> · {shortDate(entry.at)} · {entry.user}
+                    </p>
+                  </div>
+                  <span className="tnum shrink-0 font-mono text-[11.5px] font-bold">
+                    {signed(entry.delta)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
       </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <SectionCard title="28-day stock flow" icon="show_chart" className="lg:col-span-2">
+          <FlowChart
+            data={buildFlow(snap.ledger)}
+            format={(v) => n(v).toLocaleString('en-IN')}
+          />
+        </SectionCard>
+
+        <SectionCard title="Open documents" icon="description">
+          <ul className="space-y-2 text-[12px]">
+            {[
+              { label: 'Receipts waiting or ready', value: d.pendingReceipts, to: '/receipts' },
+              { label: 'Deliveries in progress', value: d.pendingDeliveries, to: '/deliveries' },
+              { label: 'Transfers to complete', value: d.openTransfers, to: '/transfers' },
+              { label: 'Adjustments awaiting approval', value: d.pendingApprovals, to: '/adjustments' },
+              { label: 'Counts to finish', value: d.openCounts, to: '/counts' },
+            ].map((row) => (
+              <li key={row.label}>
+                <Link to={row.to} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-muted">
+                  <span className="text-text-muted">{row.label}</span>
+                  <span className="tnum font-mono font-bold">{row.value}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      </div>
+
+      <Modal
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        title="Reset demo data?"
+        subtitle="This returns the whole application to the canonical scenario."
+        footer={
+          <>
+            <Button onClick={() => setResetOpen(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              icon="restart_alt"
+              loading={busy}
+              onClick={() => {
+                void run(
+                  'Reset demo data',
+                  () => demoService.reset(),
+                  { success: 'Demo data restored', detail: 'Stock, documents, ledger and notifications are back to their starting values.' },
+                ).then((res) => {
+                  if (res.ok) {
+                    setResetOpen(false);
+                    void refresh();
+                  }
+                });
+              }}
+            >
+              Reset everything
+            </Button>
+          </>
+        }
+      >
+        <WarnNote tone="warning">
+          Every receipt, delivery, transfer, count, adjustment, ledger row and notification you have created will be
+          discarded and replaced with the original dataset. Steel Rods will return to 0 kg.
+        </WarnNote>
+      </Modal>
     </>
   );
+
+  function canAnyNew(): boolean {
+    return can('receipt.create') || can('delivery.create') || can('transfer.create');
+  }
 }
+
+/** Last 28 days of net movement, oldest first — real ledger data only. */
+function buildFlow(ledger: { at: string; delta: number }[]): [string, number][] {
+  const days: [string, number][] = [];
+  const now = new Date();
+  const index = new Map<string, number>();
+  for (let i = 27; i >= 0; i -= 1) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    index.set(key, days.length);
+    days.push([key, 0]);
+  }
+  for (const entry of ledger) {
+    const key = entry.at.slice(0, 10);
+    const at = index.get(key);
+    if (at !== undefined) days[at]![1] += entry.delta;
+  }
+  return days;
+}
+
+export { StatusBadge };
